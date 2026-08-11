@@ -207,7 +207,7 @@ basta editar e **push na `main`** → o CI gera o APK novo. Nada de assets a cop
 
 ## 9. Fluxo de atualização no celular
 
-1. Abrir a aba **[Releases](https://github.com/bffx-updates/BFMIDI_Android/releases)**
+1. Abrir a aba **[Releases](https://github.com/bffx-updates/BFMiDi_APK_V13/releases)**
    no celular.
 2. Baixar o `BFMIDI-editor.apk` mais novo.
 3. Abrir o arquivo → **"Atualizar"** (mesma chave fixa = instala por cima, sem

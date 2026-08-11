@@ -53,8 +53,17 @@ jobs:
 
       - name: Build release APK
         env:
-          BF_VERSION_CODE: ${{ github.run_number }}
-          BF_VERSION_NAME: "1.0.${{ github.run_number }}"
+          # OFFSET DE 1000 — load-bearing na migracao pro repo v13
+          # (bffx-updates/BFMiDi_APK_V13, ago/2026). O versionCode vinha de
+          # github.run_number CRU, e run_number REINICIA EM 1 num repo novo:
+          # o Android recusa instalar por cima de um APK com versionCode MAIOR
+          # ("app nao instalado"), entao todo usuario do APK v12 teria que
+          # desinstalar antes de atualizar. 1000 > qualquer run_number que o
+          # repo antigo (BFMIDI_Android) tenha alcancado, entao o primeiro
+          # build daqui ja sai acima do ultimo publicado la.
+          # NUNCA baixe este offset — versionCode so pode crescer.
+          BF_VERSION_CODE: ${{ 1000 + github.run_number }}
+          BF_VERSION_NAME: "13.0.${{ github.run_number }}"
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK

@@ -28,7 +28,11 @@ o APK novo.
 
 Não precisa instalar nada localmente. O build roda no **GitHub Actions**:
 
-1. Crie um repositório no GitHub (ex.: `bffx-updates/BFMIDI_Android`).
+1. Crie um repositório no GitHub (hoje: `bffx-updates/BFMiDi_APK_V13` — migrado
+   de `BFMIDI_Android` em ago/2026, junto com a linha v13; o clone local guarda
+   o antigo como remote `v12`). **Crie VAZIO**, sem README/licença/.gitignore:
+   o `git pwa apk.bat` faz `push origin main` direto, e um commit inicial do
+   lado do GitHub rejeitaria o push por história não relacionada.
 2. Suba **o conteúdo desta pasta** (`android_app/`) na **raiz** do repositório.
 3. O workflow [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)
    roda sozinho no push (ou manualmente em **Actions → Build APK → Run workflow**).
