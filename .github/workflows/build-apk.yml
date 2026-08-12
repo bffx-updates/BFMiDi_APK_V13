@@ -51,19 +51,28 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      # OFFSET DE 1000 — load-bearing na migracao pro repo v13
+      # (bffx-updates/BFMiDi_APK_V13, ago/2026). O versionCode vinha de
+      # github.run_number CRU, e run_number REINICIA EM 1 num repo novo:
+      # o Android recusa instalar por cima de um APK com versionCode MAIOR
+      # ("app nao instalado"), entao todo usuario do APK v12 teria que
+      # desinstalar antes de atualizar. 1000 > qualquer run_number que o
+      # repo antigo (BFMIDI_Android) tenha alcancado, entao o primeiro
+      # build daqui ja sai acima do ultimo publicado la.
+      # NUNCA baixe este offset — versionCode so pode crescer.
+      #
+      # A CONTA E FEITA NO SHELL, nao em ${{ }}: expressao de workflow do
+      # GitHub NAO tem aritmetica. "${{ 1000 + github.run_number }}" deixou o
+      # arquivo INVALIDO ("Unexpected symbol: '+'") e TODO run falhava em 0s,
+      # sem job nenhum e sem Release — foi assim que a linha v13 ficou sem APK
+      # publicado (runs #1..#8, ago/2026). Exporta pro GITHUB_ENV pra que os
+      # passos seguintes (inclusive a tag do Release) usem o MESMO numero.
+      - name: Compute version
+        run: |
+          echo "BF_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "BF_VERSION_NAME=13.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
       - name: Build release APK
-        env:
-          # OFFSET DE 1000 — load-bearing na migracao pro repo v13
-          # (bffx-updates/BFMiDi_APK_V13, ago/2026). O versionCode vinha de
-          # github.run_number CRU, e run_number REINICIA EM 1 num repo novo:
-          # o Android recusa instalar por cima de um APK com versionCode MAIOR
-          # ("app nao instalado"), entao todo usuario do APK v12 teria que
-          # desinstalar antes de atualizar. 1000 > qualquer run_number que o
-          # repo antigo (BFMIDI_Android) tenha alcancado, entao o primeiro
-          # build daqui ja sai acima do ultimo publicado la.
-          # NUNCA baixe este offset — versionCode so pode crescer.
-          BF_VERSION_CODE: ${{ 1000 + github.run_number }}
-          BF_VERSION_NAME: "13.0.${{ github.run_number }}"
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Rename APK
@@ -75,9 +84,13 @@ jobs:
           name: BFMIDI-editor-apk
           path: BFMIDI-editor.apk
 
+      # A tag carrega o versionCode (nao o run_number cru): o atualizador
+      # interno do APK (MainActivity.checkForUpdate) le o numero DA TAG e
+      # compara com o versionCode instalado. Com o offset de 1000, tag=run
+      # daria "9 > 1009 = false" e o app NUNCA ofereceria atualizacao.
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: BFMIDI Editor (build ${{ github.run_number }})
+          tag_name: build-${{ env.BF_VERSION_CODE }}
+          name: BFMIDI Editor (build ${{ env.BF_VERSION_CODE }})
           files: BFMIDI-editor.apk

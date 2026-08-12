@@ -118,8 +118,10 @@ class MainActivity : AppCompatActivity() {
     // fluxo manual (baixar a release na mao) — "rodei o bat -> o app avisa e
     // atualiza". Silencioso quando offline (ex.: conectado no AP do pedal, sem
     // internet): nesse caso so checa quando o celular tiver acesso a internet.
+    // Repo da linha v13 (migrado de BFMIDI_Android em ago/2026). Apontar pro
+    // repo antigo faz o app v13 se atualizar pro APK v12.
     private val updateApiUrl =
-        "https://api.github.com/repos/bffx-updates/BFMIDI_Android/releases/latest"
+        "https://api.github.com/repos/bffx-updates/BFMiDi_APK_V13/releases/latest"
     private var pendingApkUrl: String? = null
 
     /** versionCode instalado = numero do build do CI (BF_VERSION_CODE). */
@@ -144,7 +146,7 @@ class MainActivity : AppCompatActivity() {
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 conn.disconnect()
                 val json = JSONObject(body)
-                // tag = "build-<n>"; o <n> e o run_number == versionCode do build.
+                // tag = "build-<n>"; o <n> E o versionCode do build (1000 + run).
                 val tag = json.optString("tag_name")
                 val latest = tag.substringAfterLast('-').toIntOrNull() ?: return@Thread
                 val assets = json.optJSONArray("assets") ?: return@Thread

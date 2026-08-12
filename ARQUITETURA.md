@@ -161,12 +161,19 @@ Por isso usamos uma **chave FIXA**:
 `app/build.gradle` lê do ambiente (default `1` / `1.0` em build local):
 
 ```gradle
-versionCode = BF_VERSION_CODE   (= github.run_number)
-versionName = BF_VERSION_NAME   (= "1.0.<run>")
+versionCode = BF_VERSION_CODE   (= 1000 + github.run_number)
+versionName = BF_VERSION_NAME   (= "13.0.<run>")
 ```
 
-O Release usa a tag `build-<run>`. Assim cada build é único e crescente (o Android
-sempre trata como atualização, nunca downgrade).
+O offset de 1000 existe porque `run_number` reiniciou em 1 quando o APK migrou pro
+repo `BFMiDi_APK_V13` (ago/2026) — o Android recusa instalar por cima de um APK com
+`versionCode` maior. **Nunca baixe o offset.** A conta é feita num passo de shell
+(`$GITHUB_ENV`), não em `${{ }}`: expressão de workflow do GitHub não tem aritmética.
+
+O Release usa a tag `build-<versionCode>` (o MESMO número, não o run cru — o
+atualizador interno compara o número da tag com o `versionCode` instalado). Assim
+cada build é único e crescente (o Android sempre trata como atualização, nunca
+downgrade).
 
 ---
 
