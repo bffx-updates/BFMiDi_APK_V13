@@ -409,7 +409,6 @@ class MainActivity : AppCompatActivity() {
 
     /** Exige o JSON de identidade do firmware; roteador/portal nao passa. */
     private fun reachableBfmidi(base: String): Boolean {
-        var answered = false
         try {
             val c = (URL("$base/ping").openConnection() as HttpURLConnection).apply {
                 connectTimeout = 2200
@@ -420,7 +419,6 @@ class MainActivity : AppCompatActivity() {
             }
             val body: String? = try {
                 val code = c.responseCode
-                answered = true
                 if (code == 200) {
                     c.inputStream.bufferedReader().use { it.readText() }
                 } else null
@@ -432,9 +430,12 @@ class MainActivity : AppCompatActivity() {
                 if (json != null && json.optBoolean("ok") &&
                     json.optString("product") == "BFMIDI") return true
             }
-        } catch (_: Exception) { return false }
-        if (!answered) return false
+        } catch (_: Exception) { /* cai no fallback abaixo */ }
 
+        // Roda SEMPRE que o /ping nao provou identidade — inclusive quando ele
+        // nem chegou a responder. Ja foi condicionado a "answered", e isso
+        // fazia qualquer tropeco no /ping (timeout, conexao cortada) virar
+        // "nao e um BFMiDi", sem nunca tentar a rota que o firmware antigo tem.
         // Compatibilidade <=13.6: /ping caia no SPA/404. Ainda exige a forma
         // estrutural da configuracao BFMIDI, nunca aceita so um HTTP 200.
         return try {
