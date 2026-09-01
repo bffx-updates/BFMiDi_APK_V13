@@ -8,7 +8,9 @@ e atualizado**. Companion do [README.md](README.md) (que é o "comece por aqui")
 ## 1. Por que este app existe
 
 O editor do BFMIDI é uma **web app (PWA)** servida pelo próprio pedal por **HTTP
-local** (`http://192.168.4.1` no AP, ou o IP/`bfmidi.local` no STA).
+local** (`http://192.168.4.1` no AP, ou no STA o IP, o hostname único
+`bfmidi-XXXXXX.local` ou o alias `bfmidi.local` — o firmware responde aos
+dois nomes; o alias fica ambíguo com dois pedais na mesma rede).
 
 No **iOS** dá pra "Adicionar à Tela de Início" e abrir em tela cheia. No **Android**
 **não**: o Chrome só instala PWA em **HTTPS** (ou `localhost`), e o pedal é HTTP.
@@ -30,13 +32,14 @@ WebView ignora as regras de contexto seguro/PWA — só desenha a tela em fullsc
 > Esta é a decisão central. Mudou em jun/2026 (antes a UI vinha do pedal).
 
 A tela do editor vive **dentro do APK**, em `app/src/main/assets/`. O WebView
-carrega de `file:///android_asset/index.html`. O app fala com o pedal **apenas
+carrega de `http://appassets.androidplatform.net/assets/index.html` por
+`WebViewAssetLoader`. O app fala com o pedal **apenas
 pela API JSON** (HTTP): `/bank/current`, `/config/global`, `/sw/params`, etc.
 
 ```
 ┌─────────────────────────── CELULAR (APK) ───────────────────────────┐
 │  WebView                                                            │
-│    file:///android_asset/index.html   ← UI (assets do APK)         │
+│    appassets.androidplatform.net/assets/… ← UI (assets do APK)     │
 │    app.js / app.css / icons                                        │
 │            │                                                       │
 │            │  fetch HTTP (?api=http://<pedal>)                      │
@@ -62,27 +65,36 @@ pela API JSON** (HTTP): `/bank/current`, `/config/global`, `/sw/params`, etc.
 `api.js` do webApp resolve a base da API assim (ordem de prioridade):
 
 1. `?api=<url>` na query string;
-2. se rodando de `file://` → default `http://192.168.4.1`;
-3. `localStorage['bfmidi_deviceApi']` (IP fixado pela tela de conexão).
+2. `localStorage['bfmidi_deviceApi']` (último host confirmado);
+3. no APK/preview local → fallback `http://192.168.4.1`.
 
 O nativo ([MainActivity.kt](app/src/main/java/com/bffx/bfmidi/MainActivity.kt))
-**sonda** `http://192.168.4.1` e `http://bfmidi.local`:
-- se **algum responde** → carrega `file://…/index.html?api=http://<host>`;
-- se **nenhum responde** → carrega **sem** `?api=` → o editor usa o IP fixado
-  (localStorage) ou a própria tela de conexão. **Nunca atropela o IP salvo offline.**
+usa NSD para descobrir `_http._tcp`, tenta o último host salvo e o AP. Só aceita
+`/ping` com `{product:"BFMIDI",ok:true}`; em firmware até 13.6, o fallback exige
+os campos estruturais de `/config/global`. Se nenhum responder, carrega a UI local
+sem `?api=` e mostra a tela de conexão. O `ConnectivityManager` repete a descoberta
+quando o Wi‑Fi muda e chama a ponte JS sem reload da página.
 
-### 2.3. Permissão file:// → http
+O app hoje mira `targetSdk 34`, portanto ainda não declara a permissão futura
+`ACCESS_LOCAL_NETWORK`. Ao migrar para `targetSdk 37` (Android 17), adicionar a
+permissão de runtime e o fluxo de consentimento antes de NSD/HTTP local; o uso de
+NSD já deixa a descoberta no caminho recomendado pela plataforma.
 
-A página `file://` precisa fazer `fetch` cross-origin pro `http://<pedal>`. Isso é
-liberado no WebView com (deprecados, mas necessários; app controlado, só LAN):
+### 2.3. Origem do WebView e API local
+
+`file://` foi removido. A origem virtual HTTP mantém a UI local e permite falar
+com a API HTTP sem mixed content. Os acessos perigosos ficam desligados:
 
 ```kotlin
-allowFileAccessFromFileURLs = true
-allowUniversalAccessFromFileURLs = true
+allowFileAccess = false
+allowContentAccess = false
+allowFileAccessFromFileURLs = false
+allowUniversalAccessFromFileURLs = false
 ```
 
-Não é "mixed content" (a página é `file:`, não `https:`). O CORS do firmware é
-aberto (`*`), então os fetch/OPTIONS passam.
+O firmware libera CORS apenas para origens locais/privadas conhecidas e exige o
+header `X-BFMIDI-Token` em todo POST. O token só é entregue quando o pareamento
+entra pela interface AP.
 
 ### 2.4. Uploads
 
@@ -100,7 +112,7 @@ android_app/
 │  ├─ build.gradle                                       # config do módulo + signing + versão
 │  └─ src/main/
 │     ├─ AndroidManifest.xml                             # permissões, cleartext, activity
-│     ├─ java/com/bffx/bfmidi/MainActivity.kt            # WebView + sonda + file-access
+│     ├─ java/com/bffx/bfmidi/MainActivity.kt            # AssetLoader + NSD + rede
 │     ├─ res/values/{strings,themes}.xml
 │     ├─ res/xml/network_security_config.xml             # cleartext liberado (LAN)
 │     ├─ res/mipmap-xxxhdpi/ic_launcher.png              # ícone
@@ -184,7 +196,7 @@ A `assets/` é a UI **buildada**. O firmware (privado, `PROJECT_ZERO`, **só loc
 pedal). Fluxo quando a tela muda:
 
 ```bash
-# 1) build do webApp SEM gzip (file:// não decodifica .gz)
+# 1) build do webApp SEM gzip (AssetsPathHandler serve os nomes crus)
 cd <repo do firmware>/webApp
 BF_NO_GZIP=1 npm run build          # gera ../data/ descompactado
 
@@ -200,8 +212,8 @@ cd android_app && git add -A && git commit -m "Atualiza UI embutida" && git push
 ```
 
 > **Por que SEM gzip:** o build de produção normal guarda `app.js.gz`/`app.css.gz`
-> e o firmware adiciona `Content-Encoding: gzip`. O `file://` do WebView **não**
-> descompacta — então a UI embutida precisa dos arquivos crus (`BF_NO_GZIP=1`).
+> e o firmware adiciona `Content-Encoding: gzip`. O `AssetsPathHandler` procura
+> `app.js`/`app.css`, portanto o snapshot usa `BF_NO_GZIP=1`.
 
 ---
 
@@ -232,7 +244,8 @@ basta editar e **push na `main`** → o CI gera o APK novo. Nada de assets a cop
 | Build no GitHub Actions | Sem toolchain Android local. |
 | Chave de assinatura fixa | Atualização "1 toque" (mesma assinatura). |
 | Snapshot da UI no repo do APK (não o repo do firmware) | `PROJECT_ZERO` fica **local/privado** (código que não pode vazar); só o editor compilado, já público, vai pro repo do APK. |
-| `cleartextTrafficPermitted` global | O IP do STA varia; o app só acessa o pedal na LAN. |
+| WebViewAssetLoader em origem HTTP virtual | Remove `file://` universal sem criar mixed content com a API HTTP. |
+| `cleartextTrafficPermitted` global | O IP do STA varia; descoberta valida `/ping` antes de aceitar o host. |
 
 ---
 
@@ -241,7 +254,7 @@ basta editar e **push na `main`** → o CI gera o APK novo. Nada de assets a cop
 - **"App não instalado" ao atualizar** → assinatura diferente. Só acontece migrando
   dos builds antigos (debug). Desinstale uma vez e instale o novo; daí em diante ok.
 - **UI carrega mas não conecta no pedal** → confira Wi-Fi (mesmo AP/rede do pedal).
-  Se mesmo conectado falhar, é ajuste fino de CORS/file-access (flags do §2.3). A
+  Se mesmo conectado falhar, confira a permissão de rede local e CORS/token (§2.3). A
   tela de conexão do editor também deixa fixar o IP manualmente.
 - **Tela em branco / assets não carregam** → faltou commitar a `assets/`, ou a UI
   foi buildada **com** gzip (precisa ser `BF_NO_GZIP=1`).

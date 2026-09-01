@@ -2,8 +2,16 @@ package com.bffx.bfmidi
 
 import android.annotation.SuppressLint
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.provider.MediaStore
 import android.webkit.JavascriptInterface
 import androidx.annotation.RequiresApi
@@ -20,6 +28,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -41,8 +51,16 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.webkit.WebViewAssetLoader
 import java.net.HttpURLConnection
+import java.net.Inet4Address
 import java.net.URL
+import java.net.URLEncoder
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Wrapper WebView fullscreen do editor BFMIDI servido pelo pedal.
@@ -51,9 +69,8 @@ import java.net.URL
  * como PWA no Android. Este app carrega a mesma UI direto num WebView — sem
  * barra de navegador e sem a exigencia de contexto seguro do PWA.
  *
- * Ao abrir, sonda os enderecos conhecidos em ordem (AP, depois mDNS) e
- * carrega o primeiro que responder. Se nenhum responder, mostra uma tela de
- * "tentar de novo".
+ * Ao abrir, tenta o ultimo IP, descobre _http._tcp por NSD e valida a identidade
+ * do pedal antes de entregar o host ao editor local.
  */
 class MainActivity : AppCompatActivity() {
 
@@ -64,8 +81,17 @@ class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
-    // Enderecos testados em ordem; o primeiro que responder e carregado.
-    private val candidates = listOf("http://192.168.4.1", "http://bfmidi.local")
+    private val assetOrigin = "http://appassets.androidplatform.net"
+    private val assetEntry = "$assetOrigin/assets/index.html"
+    private lateinit var assetLoader: WebViewAssetLoader
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val probing = AtomicBoolean(false)
+    private var editorLoaded = false
+    private var currentApiHost: String? = null
+    private var activityResumed = false
+    private lateinit var connectivityManager: ConnectivityManager
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private val networkReprobe = Runnable { if (activityResumed) probeAndLoad(false) }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,7 +134,10 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        probeAndLoad()
+        connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        registerNetworkObserver()
+        probeAndLoad(true)
         checkForUpdate()
     }
 
@@ -235,6 +264,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        activityResumed = true
         // Retoma a instalacao depois que o usuario habilita "apps desconhecidos".
         val url = pendingApkUrl
         if (url != null &&
@@ -244,23 +274,37 @@ class MainActivity : AppCompatActivity() {
             pendingApkUrl = null
             downloadAndInstall(url)
         }
+        scheduleNetworkReprobe()
+    }
+
+    override fun onPause() {
+        activityResumed = false
+        mainHandler.removeCallbacks(networkReprobe)
+        super.onPause()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureWebView() {
+        assetLoader = WebViewAssetLoader.Builder()
+            // HTTP virtual e intencional: a API embarcada tambem e HTTP. A
+            // origem continua sendo appassets.androidplatform.net, nao file://.
+            .setHttpAllowed(true)
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true          // localStorage (tema, idioma, IP fixado)
             databaseEnabled = true
-            allowFileAccess = true
-            // A UI vive nos assets do APK (file://) e fala com a API HTTP do pedal.
-            // Esses flags permitem que a pagina file:// faca fetch cross-origin pro
-            // http://<pedal> (deprecados mas necessarios aqui; app controlado, so LAN).
+            allowFileAccess = false
+            allowContentAccess = false
             @Suppress("DEPRECATION")
-            allowFileAccessFromFileURLs = true
+            allowFileAccessFromFileURLs = false
             @Suppress("DEPRECATION")
-            allowUniversalAccessFromFileURLs = true
+            allowUniversalAccessFromFileURLs = false
             mediaPlaybackRequiresUserGesture = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) safeBrowsingEnabled = true
             // LOAD_NO_CACHE: nunca serve recurso (app.js/app.css) do cache do
             // WebView — sempre le os assets atuais do APK. Junto com o
             // clearCache(true) no probeAndLoad, garante que, apos instalar um
@@ -270,12 +314,29 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
-            // Mantem toda navegacao dentro do WebView (a UI e single-origin).
+            override fun shouldInterceptRequest(
+                view: WebView, request: WebResourceRequest
+            ) = assetLoader.shouldInterceptRequest(request.url)
+
+            // A ponte JavaScript so existe na origem virtual confiavel. Links
+            // externos saem para o navegador do sistema e nunca assumem a UI.
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest
-            ): Boolean = false
+            ): Boolean {
+                val uri = request.url
+                val trustedAsset = uri.scheme == "http" &&
+                    uri.host == "appassets.androidplatform.net" &&
+                    (uri.port == -1 || uri.port == 80) &&
+                    (uri.path ?: "").startsWith("/assets/")
+                if (trustedAsset) return false
+                return try {
+                    startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    true
+                } catch (_: Exception) { true }
+            }
 
             override fun onPageFinished(view: WebView, url: String) {
+                if (url.startsWith(assetEntry)) editorLoaded = true
                 showWeb()
             }
 
@@ -322,38 +383,200 @@ class MainActivity : AppCompatActivity() {
      * (localStorage) ou cai na sua propria tela de conexao. Nunca atropela o IP
      * salvo quando estamos offline.
      */
-    private fun probeAndLoad() {
-        showProgress()
-        // Limpa o cache de recursos do WebView ANTES de carregar — assim a UI
-        // sempre reflete os assets do APK atual (evita app.js/app.css velhos em
-        // cache apos atualizar o APK). NAO mexe no localStorage (IP fixado,
-        // tema, idioma): clearCache so apaga o cache HTTP/recursos, nao os dados.
-        webView.clearCache(true)
+    private fun probeAndLoad(initial: Boolean = false) {
+        if (!probing.compareAndSet(false, true)) return
+        if (initial && !editorLoaded) showProgress()
+        if (initial) webView.clearCache(true)
         Thread {
-            val apiHost = candidates.firstOrNull { reachable(it) }
-            runOnUiThread {
-                val url = if (apiHost != null)
-                    "file:///android_asset/index.html?api=$apiHost"
-                else
-                    "file:///android_asset/index.html"
-                webView.loadUrl(url)
+            try {
+                val prefs = getSharedPreferences("bfmidi_network", MODE_PRIVATE)
+                val saved = prefs.getString("last_api", null)
+                val candidates = linkedSetOf<String>()
+                if (!saved.isNullOrBlank()) candidates.add(saved)
+                candidates.addAll(discoverNsdCandidates(2200))
+                candidates.add("http://192.168.4.1")
+                // Compatibilidade com firmware <=13.6, anterior ao hostname
+                // unico e ao TXT de descoberta.
+                candidates.add("http://bfmidi.local")
+                val apiHost = candidates.firstOrNull { reachableBfmidi(it) }
+                if (apiHost != null) prefs.edit().putString("last_api", apiHost).apply()
+                runOnUiThread { deliverApiHost(apiHost) }
+            } finally {
+                probing.set(false)
             }
         }.start()
     }
 
-    /** True se o host responder qualquer status HTTP dentro do timeout. */
-    private fun reachable(base: String): Boolean = try {
-        val c = (URL("$base/").openConnection() as HttpURLConnection).apply {
-            connectTimeout = 2500
-            readTimeout = 2500
-            requestMethod = "GET"
-            instanceFollowRedirects = false
+    /** Exige o JSON de identidade do firmware; roteador/portal nao passa. */
+    private fun reachableBfmidi(base: String): Boolean {
+        var answered = false
+        try {
+            val c = (URL("$base/ping").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 2200
+                readTimeout = 2200
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                useCaches = false
+            }
+            val body: String? = try {
+                val code = c.responseCode
+                answered = true
+                if (code == 200) {
+                    c.inputStream.bufferedReader().use { it.readText() }
+                } else null
+            } finally {
+                c.disconnect()
+            }
+            if (body != null) {
+                val json = runCatching { JSONObject(body) }.getOrNull()
+                if (json != null && json.optBoolean("ok") &&
+                    json.optString("product") == "BFMIDI") return true
+            }
+        } catch (_: Exception) { return false }
+        if (!answered) return false
+
+        // Compatibilidade <=13.6: /ping caia no SPA/404. Ainda exige a forma
+        // estrutural da configuracao BFMIDI, nunca aceita so um HTTP 200.
+        return try {
+            val c = (URL("$base/config/global").openConnection()
+                    as HttpURLConnection).apply {
+                connectTimeout = 3000
+                readTimeout = 3000
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                useCaches = false
+            }
+            val body: String? = try {
+                if (c.responseCode == 200) {
+                    c.inputStream.bufferedReader().use { it.readText() }
+                } else null
+            } finally {
+                c.disconnect()
+            }
+            if (body == null) {
+                false
+            } else {
+                val json = runCatching { JSONObject(body) }.getOrNull()
+                json != null && (json.has("board") || json.has("chip"))
+            }
+        } catch (_: Exception) { false }
+    }
+
+    private fun deliverApiHost(apiHost: String?) {
+        if (!editorLoaded) {
+            currentApiHost = apiHost
+            val suffix = if (apiHost != null)
+                "?api=" + URLEncoder.encode(apiHost, Charsets.UTF_8.name()) else ""
+            webView.loadUrl(assetEntry + suffix)
+            return
         }
-        val code = c.responseCode
-        c.disconnect()
-        code in 100..599
-    } catch (e: Exception) {
-        false
+        if (apiHost != null && apiHost != currentApiHost) {
+            currentApiHost = apiHost
+            webView.evaluateJavascript(
+                "window.BFMIDI_SET_API && window.BFMIDI_SET_API(${JSONObject.quote(apiHost)})",
+                null
+            )
+        } else if (apiHost == null) {
+            // Forca a proxima volta do MESMO IP (comum no AP 192.168.4.1) a
+            // notificar o editor de novo, sem recarregar a pagina.
+            currentApiHost = null
+            webView.evaluateJavascript(
+                "window.BFMIDI_NETWORK_LOST && window.BFMIDI_NETWORK_LOST()", null
+            )
+        }
+        showWeb()
+    }
+
+    /**
+     * Descobre o servico HTTP anunciado pelo ESP32. O MulticastLock existe
+     * apenas durante a descoberta; deixa de drenar bateria logo depois.
+     */
+    @Suppress("DEPRECATION")
+    private fun discoverNsdCandidates(timeoutMs: Long): List<String> {
+        val nsd = getSystemService(Context.NSD_SERVICE) as NsdManager
+        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+        val lock = wifi.createMulticastLock("bfmidi-nsd").apply {
+            setReferenceCounted(false)
+        }
+        val found = Collections.synchronizedList(mutableListOf<String>())
+        val done = CountDownLatch(1)
+        val resolving = AtomicBoolean(false)
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(type: String) = Unit
+            override fun onServiceFound(service: NsdServiceInfo) {
+                if (!service.serviceName.contains("bfmidi", ignoreCase = true) ||
+                    !resolving.compareAndSet(false, true)) return
+                try {
+                    nsd.resolveService(service, object : NsdManager.ResolveListener {
+                        override fun onResolveFailed(info: NsdServiceInfo, code: Int) {
+                            resolving.set(false)
+                        }
+                        override fun onServiceResolved(info: NsdServiceInfo) {
+                            val host = info.host
+                            if (host is Inet4Address) {
+                                val port = if (info.port > 0) info.port else 80
+                                found.add("http://${host.hostAddress}:$port")
+                                done.countDown()
+                            } else {
+                                resolving.set(false)
+                            }
+                        }
+                    })
+                } catch (_: Exception) { resolving.set(false) }
+            }
+            override fun onServiceLost(service: NsdServiceInfo) = Unit
+            override fun onDiscoveryStopped(type: String) = Unit
+            override fun onStartDiscoveryFailed(type: String, code: Int) { done.countDown() }
+            override fun onStopDiscoveryFailed(type: String, code: Int) = Unit
+        }
+        return try {
+            lock.acquire()
+            val wifiNetwork = connectivityManager.allNetworks.firstOrNull { network ->
+                connectivityManager.getNetworkCapabilities(network)
+                    ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                wifiNetwork != null) {
+                // No AP sem internet, a rede default pode continuar sendo a
+                // celular. A sobrecarga API 33+ fixa o browse mDNS na Wi-Fi.
+                val callbackExecutor = Executor { command -> mainHandler.post(command) }
+                nsd.discoverServices(
+                    "_http._tcp.", NsdManager.PROTOCOL_DNS_SD, wifiNetwork,
+                    callbackExecutor, listener
+                )
+            } else {
+                nsd.discoverServices(
+                    "_http._tcp.", NsdManager.PROTOCOL_DNS_SD, listener
+                )
+            }
+            done.await(timeoutMs, TimeUnit.MILLISECONDS)
+            found.toList().distinct()
+        } catch (_: Exception) {
+            emptyList()
+        } finally {
+            try { nsd.stopServiceDiscovery(listener) } catch (_: Exception) {}
+            if (lock.isHeld) lock.release()
+        }
+    }
+
+    private fun registerNetworkObserver() {
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = scheduleNetworkReprobe()
+            override fun onLost(network: Network) = scheduleNetworkReprobe()
+            override fun onCapabilitiesChanged(
+                network: Network, capabilities: NetworkCapabilities
+            ) = scheduleNetworkReprobe()
+        }
+        networkCallback = callback
+        connectivityManager.registerNetworkCallback(request, callback)
+    }
+
+    private fun scheduleNetworkReprobe() {
+        mainHandler.removeCallbacks(networkReprobe)
+        mainHandler.postDelayed(networkReprobe, 800)
     }
 
     // ── Troca de telas (WebView / progresso / erro) ─────────────────────
@@ -576,6 +799,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(networkReprobe)
+        networkCallback?.let {
+            try { connectivityManager.unregisterNetworkCallback(it) }
+            catch (_: Exception) {}
+        }
         webView.destroy()
         super.onDestroy()
     }

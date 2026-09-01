@@ -7,10 +7,11 @@ App Android que roda o **editor BFMIDI** em tela cheia, sem a barra do navegador
 (HTTP local) usando o `?api=` do editor. Vantagens: mudança de tela = atualizar
 o APK (sem reflashar a LittleFS), carrega mais rápido e sem cache velho do PWA.
 
-Ao abrir, sonda o pedal em `http://192.168.4.1` (AP) e `http://bfmidi.local`
-(mDNS, STA): se algum responder, passa o endereço no `?api=`; se nenhum responder,
-carrega a UI local mesmo assim e usa o IP que o usuário fixou (a própria tela de
-conexão do editor permite trocar/fixar o IP em runtime).
+Ao abrir, descobre serviços BFMIDI `_http._tcp` por NSD/mDNS, tenta o último IP
+confirmado, o AP `http://192.168.4.1` e o hostname legado. Um firmware atual só
+é aceito se `/ping` devolver a identidade JSON BFMIDI; para versões até 13.6, o
+fallback ainda exige a estrutura própria de `/config/global`. Mudanças de rede são observadas pelo
+`ConnectivityManager` e trocam a API sem recarregar a UI nem perder edições.
 
 Suporta upload de imagens/ícones (seletor de arquivos do Android). Só Wi-Fi
 (sem Web Serial/USB).
@@ -19,7 +20,7 @@ Suporta upload de imagens/ícones (seletor de arquivos do Android). Só Wi-Fi
 
 A pasta `app/src/main/assets/` é a UI do editor **buildada** (`BF_NO_GZIP=1
 npm run build` no `webApp/`, copiada do `data/` resultante — arquivos
-DESCOMPACTADOS, pois `file://` não decodifica `.gz`). O firmware (privado, local)
+DESCOMPACTADOS, pois o handler de assets serve o nome cru, não `.gz`). O firmware (privado, local)
 **não** entra aqui: só o editor compilado, que já é público em qualquer pedal.
 Ao mudar a UI: rebuildar → copiar `data/` → `assets/` → commit/push → o CI gera
 o APK novo.
