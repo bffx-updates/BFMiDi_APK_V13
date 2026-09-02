@@ -8,9 +8,8 @@ e atualizado**. Companion do [README.md](README.md) (que é o "comece por aqui")
 ## 1. Por que este app existe
 
 O editor do BFMIDI é uma **web app (PWA)** servida pelo próprio pedal por **HTTP
-local** (`http://192.168.4.1` no AP, ou no STA o IP, o hostname único
-`bfmidi-XXXXXX.local` ou o alias `bfmidi.local` — o firmware responde aos
-dois nomes; o alias fica ambíguo com dois pedais na mesma rede).
+local** (`http://192.168.4.1` no AP, ou no STA o IP ou `bfmidi.local` — o
+mesmo nome nas duas interfaces; fica ambíguo com dois pedais na mesma rede).
 
 No **iOS** dá pra "Adicionar à Tela de Início" e abrir em tela cheia. No **Android**
 **não**: o Chrome só instala PWA em **HTTPS** (ou `localhost`), e o pedal é HTTP.
