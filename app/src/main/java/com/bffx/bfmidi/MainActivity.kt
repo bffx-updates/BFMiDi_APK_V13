@@ -55,7 +55,6 @@ import androidx.webkit.WebViewAssetLoader
 import java.net.HttpURLConnection
 import java.net.Inet4Address
 import java.net.URL
-import java.net.URLEncoder
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
@@ -88,10 +87,28 @@ class MainActivity : AppCompatActivity() {
     private val probing = AtomicBoolean(false)
     private var editorLoaded = false
     private var currentApiHost: String? = null
+    // Resultado de uma sondagem que terminou ANTES de a pagina carregar: e
+    // entregue no onPageFinished (ver deliverApiHost). `has` separado porque
+    // null e um resultado valido ("nenhum pedal").
+    private var hasPendingApi = false
+    private var pendingApiHost: String? = null
     private var activityResumed = false
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val networkReprobe = Runnable { if (activityResumed) probeAndLoad(false) }
+    // Sondagem OCIOSA: enquanto nao ha pedal (currentApiHost == null) o
+    // ConnectivityManager fica mudo — ligar o pedal com o celular JA na mesma
+    // rede nao gera evento nenhum. Sem isto o editor ficaria no MODO OFFLINE
+    // ate uma troca de Wi-Fi ou um onResume. Com pedal achado, o runnable so
+    // se reagenda (o health check do editor cuida da queda).
+    private val idleReprobeMs = 20_000L
+    private val idleReprobe = object : Runnable {
+        override fun run() {
+            if (!activityResumed) return
+            if (currentApiHost == null) probeAndLoad(false)
+            mainHandler.postDelayed(this, idleReprobeMs)
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -275,11 +292,14 @@ class MainActivity : AppCompatActivity() {
             downloadAndInstall(url)
         }
         scheduleNetworkReprobe()
+        mainHandler.removeCallbacks(idleReprobe)
+        mainHandler.postDelayed(idleReprobe, idleReprobeMs)
     }
 
     override fun onPause() {
         activityResumed = false
         mainHandler.removeCallbacks(networkReprobe)
+        mainHandler.removeCallbacks(idleReprobe)
         super.onPause()
     }
 
@@ -336,7 +356,16 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                if (url.startsWith(assetEntry)) editorLoaded = true
+                if (url.startsWith(assetEntry)) {
+                    editorLoaded = true
+                    // Sondagem que terminou durante o load: entrega agora. O
+                    // editor tem um stub de modulo que guarda a chamada ate o
+                    // App() montar a ponte, entao nao ha corrida com o app.js.
+                    if (hasPendingApi) {
+                        hasPendingApi = false
+                        deliverApiHost(pendingApiHost)
+                    }
+                }
                 showWeb()
             }
 
@@ -377,16 +406,23 @@ class MainActivity : AppCompatActivity() {
     /**
      * Carrega a UI LOCAL (assets do APK) e aponta a API pro pedal.
      *
-     * A sondagem so decide qual endereco passar no ?api= (AP 192.168.4.1 x mDNS
-     * bfmidi.local). Se algum responder, passa ele no ?api=. Se NENHUM responder,
-     * carrega SEM ?api= — assim o editor usa o IP que o usuario fixou antes
-     * (localStorage) ou cai na sua propria tela de conexao. Nunca atropela o IP
-     * salvo quando estamos offline.
+     * A UI sobe NA HORA, sem ?api= — o editor abre em MODO OFFLINE (dispositivo
+     * virtual do offline_device.js, com os dados de offline_seed.json / do que
+     * o usuario ja editou) — e a sondagem corre em paralelo. Antes o app ficava
+     * no spinner ate a sondagem terminar (a descoberta NSD sozinha sao 2,2 s
+     * fixos; sem pedal, ate ~20 s somando os timeouts) e, sem pedal, caia na
+     * tela de conexao do editor. Hoje o resultado da sondagem chega pela ponte
+     * JS: BFMIDI_SET_API(host) troca pro pedal real, BFMIDI_NETWORK_LOST()
+     * deixa/devolve ao modo offline. Nunca atropela o IP salvo quando estamos
+     * offline.
      */
     private fun probeAndLoad(initial: Boolean = false) {
+        if (initial && !editorLoaded) {
+            showProgress()
+            webView.clearCache(true)
+            webView.loadUrl(assetEntry)
+        }
         if (!probing.compareAndSet(false, true)) return
-        if (initial && !editorLoaded) showProgress()
-        if (initial) webView.clearCache(true)
         Thread {
             try {
                 val prefs = getSharedPreferences("bfmidi_network", MODE_PRIVATE)
@@ -465,10 +501,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun deliverApiHost(apiHost: String?) {
         if (!editorLoaded) {
-            currentApiHost = apiHost
-            val suffix = if (apiHost != null)
-                "?api=" + URLEncoder.encode(apiHost, Charsets.UTF_8.name()) else ""
-            webView.loadUrl(assetEntry + suffix)
+            // A pagina ainda esta carregando (probeAndLoad ja mandou o loadUrl):
+            // guarda e entrega no onPageFinished. Sem ?api= na URL de proposito
+            // — recarregar a pagina aqui jogaria fora o editor que acabou de
+            // subir em modo offline.
+            hasPendingApi = true
+            pendingApiHost = apiHost
             return
         }
         if (apiHost != null && apiHost != currentApiHost) {

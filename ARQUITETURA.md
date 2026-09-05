@@ -68,11 +68,21 @@ pela API JSON** (HTTP): `/bank/current`, `/config/global`, `/sw/params`, etc.
 3. no APK/preview local → fallback `http://192.168.4.1`.
 
 O nativo ([MainActivity.kt](app/src/main/java/com/bffx/bfmidi/MainActivity.kt))
-usa NSD para descobrir `_http._tcp`, tenta o último host salvo e o AP. Só aceita
-`/ping` com `{product:"BFMIDI",ok:true}`; em firmware até 13.6, o fallback exige
-os campos estruturais de `/config/global`. Se nenhum responder, carrega a UI local
-sem `?api=` e mostra a tela de conexão. O `ConnectivityManager` repete a descoberta
-quando o Wi‑Fi muda e chama a ponte JS sem reload da página.
+carrega a UI local **imediatamente e sem `?api=`** — o editor sobe em MODO
+OFFLINE (dispositivo virtual de `webApp/offline_device.js`, semeado por
+`assets/offline_seed.json`) — e, em paralelo, usa NSD para descobrir
+`_http._tcp`, tenta o último host salvo e o AP. Só aceita `/ping` com
+`{product:"BFMIDI",ok:true}`; em firmware até 13.6, o fallback exige os campos
+estruturais de `/config/global`. O resultado vai pela ponte JS: `BFMIDI_SET_API`
+(pedal achado — o editor troca de aparelho e recarrega tudo) ou
+`BFMIDI_NETWORK_LOST` (fica/volta ao offline). Se a sondagem termina antes de a
+página carregar, o resultado é guardado e entregue no `onPageFinished` (o
+editor tem um stub que segura a chamada até o `App()` montar). O
+`ConnectivityManager` repete a descoberta quando o Wi‑Fi muda; sem pedal, um
+`Runnable` ocioso repete a cada 20 s em primeiro plano (ligar o pedal com o
+celular já na rede não gera evento). A tela de conexão do editor não é mais
+mostrada pelo app (set/2026); o item 1 da lista acima (`?api=`) sobrevive só
+para o preview local e para `?api=offline`, que força o modo offline no browser.
 
 O app hoje mira `targetSdk 34`, portanto ainda não declara a permissão futura
 `ACCESS_LOCAL_NETWORK`. Ao migrar para `targetSdk 37` (Android 17), adicionar a

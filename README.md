@@ -7,11 +7,20 @@ App Android que roda o **editor BFMIDI** em tela cheia, sem a barra do navegador
 (HTTP local) usando o `?api=` do editor. Vantagens: mudança de tela = atualizar
 o APK (sem reflashar a LittleFS), carrega mais rápido e sem cache velho do PWA.
 
-Ao abrir, descobre serviços BFMIDI `_http._tcp` por NSD/mDNS, tenta o último IP
-confirmado, o AP `http://192.168.4.1` e o hostname legado. Um firmware atual só
-é aceito se `/ping` devolver a identidade JSON BFMIDI; para versões até 13.6, o
-fallback ainda exige a estrutura própria de `/config/global`. Mudanças de rede são observadas pelo
-`ConnectivityManager` e trocam a API sem recarregar a UI nem perder edições.
+Ao abrir, o editor sobe **na hora, em MODO OFFLINE**: uma BFMIDI virtual guardada
+no próprio celular (`webApp/offline_device.js`), semeada pelo `offline_seed.json`
+dos assets (= `production/backup_padrao.json`). Em paralelo o app descobre
+serviços BFMIDI `_http._tcp` por NSD/mDNS, tenta o último IP confirmado, o AP
+`http://192.168.4.1` e o hostname legado; achando um pedal, entrega o endereço
+pela ponte JS (`BFMIDI_SET_API`) e o editor troca para ele sem recarregar. Um
+firmware atual só é aceito se `/ping` devolver a identidade JSON BFMIDI; para
+versões até 13.6, o fallback ainda exige a estrutura própria de `/config/global`.
+Mudanças de rede são observadas pelo `ConnectivityManager` e trocam a API sem
+recarregar a UI nem perder edições; sem pedal, uma sondagem ociosa repete a
+busca a cada 20 s enquanto o app está em primeiro plano. A tela de conexão do
+editor **não aparece mais** no app: sem pedal, edita-se a cópia local (chip
+OFFLINE no header; card MODO OFFLINE em SYSTEM > MANUTENÇÃO > RESTAURAR), e o
+caminho para o pedal é BACKUP offline → RESTAURAR conectado.
 
 Suporta upload de imagens/ícones (seletor de arquivos do Android). Só Wi-Fi
 (sem Web Serial/USB).
