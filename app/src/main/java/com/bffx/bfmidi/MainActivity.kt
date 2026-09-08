@@ -1,5 +1,9 @@
 package com.bffx.bfmidi
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.wifi.WifiNetworkSpecifier
+import androidx.core.content.ContextCompat
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
@@ -112,6 +116,101 @@ class MainActivity : AppCompatActivity() {
             if (!activityResumed) return
             probeAndLoad(false)
             mainHandler.postDelayed(this, idleReprobeMs)
+        }
+    }
+
+    // Pedido de rede mantido durante a sessao: no Android a rede local pode
+    // ser secundaria. Nunca selecionar outra Wi-Fi no lugar da concedida.
+    private var apNetwork: Network? = null
+    private var apCallback: ConnectivityManager.NetworkCallback? = null
+    private var joiningAp = false
+    private val wifiPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) requestApNetwork()
+        else {
+            joiningAp = false
+            wifiJoinStatus("error", "Permissão negada. Libere o acesso nos ajustes ou conecte ao Wi-Fi manualmente.")
+        }
+    }
+
+    private fun wifiJoinStatus(state: String, message: String) {
+        if (isDestroyed) return
+        val payload = JSONObject().put("state", state).put("message", message)
+        webView.evaluateJavascript(
+            "window.dispatchEvent(new CustomEvent('bfmidi-wifi-join',{detail:$payload}))", null)
+    }
+
+    private inner class WifiBridge {
+        @JavascriptInterface fun connectAP() { runOnUiThread { connectToAp() } }
+        @JavascriptInterface fun openSettings() { runOnUiThread {
+            runCatching { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) }
+                .onFailure { wifiJoinStatus("error", "Abra os ajustes de Wi-Fi do aparelho e escolha BFMIDI_WIFI.") }
+        } }
+    }
+
+    private fun connectToAp() {
+        if (joiningAp) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            wifiJoinStatus("error", "Neste Android, abra os ajustes de Wi-Fi e escolha BFMIDI_WIFI. A senha está abaixo.")
+            return
+        }
+        joiningAp = true
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            Manifest.permission.NEARBY_WIFI_DEVICES else Manifest.permission.ACCESS_FINE_LOCATION
+        if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+            wifiPermission.launch(permission)
+        } else requestApNetwork()
+    }
+
+    private fun releaseApRequest() {
+        apCallback?.let { runCatching { connectivityManager.unregisterNetworkCallback(it) } }
+        apCallback = null
+        apNetwork = null
+        joiningAp = false
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun requestApNetwork() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        releaseApRequest()
+        joiningAp = true
+        // Valores fixos do firmware NET_WIFI.h. Nunca aceitar SSID/senha do JS.
+        val specifier = WifiNetworkSpecifier.Builder()
+            .setSsid("BFMIDI_WIFI").setWpa2Passphrase("bfmidi@editor").build()
+        val request = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .setNetworkSpecifier(specifier).build()
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { runOnUiThread {
+                if (apCallback !== this) return@runOnUiThread
+                apNetwork = network
+                joiningAp = false
+                currentApiHost = null
+                getSharedPreferences("bfmidi_network", MODE_PRIVATE).edit()
+                    .putString("last_api", "http://192.168.4.1").apply()
+                wifiJoinStatus("joined", "Wi-Fi conectado. Procurando o pedal…")
+                scheduleNetworkReprobe()
+            } }
+            override fun onUnavailable() { runOnUiThread {
+                if (apCallback !== this) return@runOnUiThread
+                releaseApRequest()
+                wifiJoinStatus("error", "Conexão não concluída. Ligue o Wi-Fi do pedal, aproxime-se e tente novamente. Confirme a solicitação do Android.")
+            } }
+            override fun onLost(network: Network) { runOnUiThread {
+                if (apCallback !== this) return@runOnUiThread
+                releaseApRequest()
+                wifiJoinStatus("error", "A conexão com BFMIDI_WIFI foi perdida. Tente novamente.")
+                scheduleNetworkReprobe()
+            } }
+        }
+        apCallback = callback
+        try {
+            connectivityManager.requestNetwork(request, callback, 30_000)
+        } catch (_: Exception) {
+            releaseApRequest()
+            wifiJoinStatus("error", "Não foi possível solicitar a conexão. Verifique o Wi-Fi e as permissões nos ajustes do sistema.")
         }
     }
 
@@ -406,6 +505,7 @@ class MainActivity : AppCompatActivity() {
         // O editor monta o backup e chama window.BFMIDIDownloader.saveText(...),
         // que grava o arquivo na pasta Downloads (ver DownloadBridge).
         webView.addJavascriptInterface(DownloadBridge(), "BFMIDIDownloader")
+        webView.addJavascriptInterface(WifiBridge(), "BFMIDIWifi")
     }
 
     /**
@@ -433,7 +533,7 @@ class MainActivity : AppCompatActivity() {
         }
         val generation = networkGeneration.get()
         val current = currentApiHost
-        val wifiNetwork = connectivityManager.allNetworks.firstOrNull {
+        val wifiNetwork = apNetwork ?: connectivityManager.allNetworks.firstOrNull {
             connectivityManager.getNetworkCapabilities(it)
                 ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         }
@@ -624,7 +724,7 @@ class MainActivity : AppCompatActivity() {
         }
         return try {
             lock.acquire()
-            val wifiNetwork = connectivityManager.allNetworks.firstOrNull { network ->
+            val wifiNetwork = apNetwork ?: connectivityManager.allNetworks.firstOrNull { network ->
                 connectivityManager.getNetworkCapabilities(network)
                     ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             }
@@ -899,6 +999,7 @@ class MainActivity : AppCompatActivity() {
             catch (_: Exception) {}
         }
         networkGeneration.incrementAndGet()
+        releaseApRequest()
         mainHandler.removeCallbacks(idleReprobe)
         runCatching { connectivityManager.bindProcessToNetwork(null) }
         webView.destroy()
