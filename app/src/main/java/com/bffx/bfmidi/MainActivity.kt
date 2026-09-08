@@ -58,6 +58,10 @@ import java.net.URL
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.Callable
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -85,6 +89,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var assetLoader: WebViewAssetLoader
     private val mainHandler = Handler(Looper.getMainLooper())
     private val probing = AtomicBoolean(false)
+    private val networkGeneration = AtomicInteger(0)
+    private var pendingReprobe = false
+    private var failedProbes = 0
     private var editorLoaded = false
     private var currentApiHost: String? = null
     // Resultado de uma sondagem que terminou ANTES de a pagina carregar: e
@@ -96,16 +103,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var connectivityManager: ConnectivityManager
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val networkReprobe = Runnable { if (activityResumed) probeAndLoad(false) }
-    // Sondagem OCIOSA: enquanto nao ha pedal (currentApiHost == null) o
-    // ConnectivityManager fica mudo — ligar o pedal com o celular JA na mesma
-    // rede nao gera evento nenhum. Sem isto o editor ficaria no MODO OFFLINE
-    // ate uma troca de Wi-Fi ou um onResume. Com pedal achado, o runnable so
-    // se reagenda (o health check do editor cuida da queda).
+    // Verificacao periodica em primeiro plano: recupera inclusive reboot e
+    // troca de IP sem evento de conectividade. O host atual tem prioridade;
+    // duas sondagens sem resposta confirmam a perda antes do modo offline.
     private val idleReprobeMs = 20_000L
     private val idleReprobe = object : Runnable {
         override fun run() {
             if (!activityResumed) return
-            if (currentApiHost == null) probeAndLoad(false)
+            probeAndLoad(false)
             mainHandler.postDelayed(this, idleReprobeMs)
         }
     }
@@ -422,31 +427,79 @@ class MainActivity : AppCompatActivity() {
             webView.clearCache(true)
             webView.loadUrl(assetEntry)
         }
-        if (!probing.compareAndSet(false, true)) return
+        if (!probing.compareAndSet(false, true)) {
+            pendingReprobe = true
+            return
+        }
+        val generation = networkGeneration.get()
+        val current = currentApiHost
+        val wifiNetwork = connectivityManager.allNetworks.firstOrNull {
+            connectivityManager.getNetworkCapabilities(it)
+                ?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        }
+        // Inclui o WebView (POSTs/uploads tambem): AP sem internet nao pode
+        // deixar o transporte do editor seguir a rede celular padrao.
+        if (!runCatching { connectivityManager.bindProcessToNetwork(wifiNetwork) }
+                .getOrDefault(false)) {
+            probing.set(false)
+            mainHandler.postDelayed(networkReprobe, 800)
+            return
+        }
         Thread {
+            var apiHost: String? = null
+            val pool = Executors.newFixedThreadPool(3)
             try {
                 val prefs = getSharedPreferences("bfmidi_network", MODE_PRIVATE)
                 val saved = prefs.getString("last_api", null)
-                val candidates = linkedSetOf<String>()
-                if (!saved.isNullOrBlank()) candidates.add(saved)
-                candidates.addAll(discoverNsdCandidates(2200))
-                candidates.add("http://192.168.4.1")
-                // Compatibilidade com firmware <=13.6, anterior ao hostname
-                // unico e ao TXT de descoberta.
-                candidates.add("http://bfmidi.local")
-                val apiHost = candidates.firstOrNull { reachableBfmidi(it) }
-                if (apiHost != null) prefs.edit().putString("last_api", apiHost).apply()
-                runOnUiThread { deliverApiHost(apiHost) }
-            } finally {
-                probing.set(false)
+                // Nao troca de pedal so porque outro respondeu mais rapido.
+                if (current != null && reachableBfmidi(current, wifiNetwork)) {
+                    apiHost = current
+                    return@Thread
+                }
+                val results = ExecutorCompletionService<String?>(pool)
+                val known = listOfNotNull(saved, "http://192.168.4.1").distinct()
+                for (host in known) results.submit(Callable {
+                    if (reachableBfmidi(host, wifiNetwork)) host else null
+                })
+                results.submit(Callable {
+                    (discoverNsdCandidates(2200) + "http://bfmidi.local")
+                        .distinct().firstOrNull { reachableBfmidi(it, wifiNetwork) }
+                })
+                for (i in 0 until known.size + 1) {
+                    val result = results.take().get()
+                    if (result != null) { apiHost = result; break }
+                }
+            } catch (_: Exception) { /* Uma nova tentativa confirma a queda. */ }
+            finally {
+                pool.shutdownNow()
+                val result = apiHost
+                runOnUiThread {
+                    probing.set(false)
+                    if (!isDestroyed && generation == networkGeneration.get()) {
+                        if (result != null) {
+                            failedProbes = 0
+                            getSharedPreferences("bfmidi_network", MODE_PRIVATE)
+                                .edit().putString("last_api", result).apply()
+                            deliverApiHost(result)
+                        } else if (++failedProbes >= 2 || currentApiHost == null) {
+                            deliverApiHost(null)
+                        } else {
+                            mainHandler.postDelayed(networkReprobe, 2500)
+                        }
+                    }
+                    if (pendingReprobe && activityResumed && !isDestroyed) {
+                        pendingReprobe = false
+                        probeAndLoad(false)
+                    }
+                }
             }
         }.start()
     }
 
     /** Exige o JSON de identidade do firmware; roteador/portal nao passa. */
-    private fun reachableBfmidi(base: String): Boolean {
+    private fun reachableBfmidi(base: String, network: Network?): Boolean {
         try {
-            val c = (URL("$base/ping").openConnection() as HttpURLConnection).apply {
+            val c = ((network?.openConnection(URL("$base/ping")) ?: URL("$base/ping").openConnection()) as HttpURLConnection).apply {
                 connectTimeout = 2200
                 readTimeout = 2200
                 requestMethod = "GET"
@@ -468,6 +521,7 @@ class MainActivity : AppCompatActivity() {
             }
         } catch (_: Exception) { /* cai no fallback abaixo */ }
 
+        if (Thread.currentThread().isInterrupted) return false
         // Roda SEMPRE que o /ping nao provou identidade — inclusive quando ele
         // nem chegou a responder. Ja foi condicionado a "answered", e isso
         // fazia qualquer tropeco no /ping (timeout, conexao cortada) virar
@@ -475,7 +529,7 @@ class MainActivity : AppCompatActivity() {
         // Compatibilidade <=13.6: /ping caia no SPA/404. Ainda exige a forma
         // estrutural da configuracao BFMIDI, nunca aceita so um HTTP 200.
         return try {
-            val c = (URL("$base/config/global").openConnection()
+            val c = ((network?.openConnection(URL("$base/config/global")) ?: URL("$base/config/global").openConnection())
                     as HttpURLConnection).apply {
                 connectTimeout = 3000
                 readTimeout = 3000
@@ -554,7 +608,7 @@ class MainActivity : AppCompatActivity() {
                             val host = info.host
                             if (host is Inet4Address) {
                                 val port = if (info.port > 0) info.port else 80
-                                found.add("http://${host.hostAddress}:$port")
+                                found.add("http://${host.hostAddress}" + if (port == 80) "" else ":$port")
                                 done.countDown()
                             } else {
                                 resolving.set(false)
@@ -614,6 +668,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scheduleNetworkReprobe() {
+        networkGeneration.incrementAndGet()
         mainHandler.removeCallbacks(networkReprobe)
         mainHandler.postDelayed(networkReprobe, 800)
     }
@@ -843,6 +898,9 @@ class MainActivity : AppCompatActivity() {
             try { connectivityManager.unregisterNetworkCallback(it) }
             catch (_: Exception) {}
         }
+        networkGeneration.incrementAndGet()
+        mainHandler.removeCallbacks(idleReprobe)
+        runCatching { connectivityManager.bindProcessToNetwork(null) }
         webView.destroy()
         super.onDestroy()
     }
