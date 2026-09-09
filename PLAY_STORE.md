@@ -16,6 +16,49 @@ algo que não está aqui, é regra nova: siga o Console.
 
 ---
 
+## Estado em 9 set 2026 (o que já foi feito no Console)
+
+- App **BFMiDi Editor** criado (`com.bffx.bfmidi`, conta pessoal de Carlos Eduardo
+  Dalsin, ID `7593973575521061063`, app `4972186240686715165`). Todas as tarefas de
+  "Configurar o app" concluídas (privacidade, segurança dos dados, IARC, ficha da
+  loja com ícone, feature graphic e 5 screenshots de celular).
+- **Play App Signing com a chave existente**: o `bfmidi-release.jks` foi exportado
+  com o PEPK e enviado (opção *Exportar e fazer upload de uma chave de um keystore
+  Java*). Chave de assinatura do app **e** chave de upload = SHA-256
+  `A7:1F:8D:E1:75:DB:D5:C2:55:02:D8:74:34:A5:87:6D:35:D4:EB:E5:36:A8:73:70:2C:12:41:13:C0:80:C5:E5`
+  (a mesma do APK de sideload). O CI continua assinando o `.aab` com esse jks.
+- **Teste interno ATIVO** com o build `1062 (13.8.62)` (Release `build-1062` do
+  GitHub). Lista "Testadores BFMiDi" = `carlosedudalsin@gmail.com`. Link de
+  participação: <https://play.google.com/apps/internaltest/4701259295386312902>.
+  Até a revisão, o app aparece com o nome temporário "com.bffx.bfmidi (unreviewed)".
+- **Teste fechado (faixa Alpha) ENVIADO PARA REVISÃO** (9 set, ~01:00): bundle 1062,
+  notas pt-BR, 177 países, lista "Teste fechado BFMiDi" com 6 e-mails (carlosedudalsin,
+  brunoguita1040, janioprimo1, escrevaparaleonardo, britodiegopassos31, caio.anacecilia —
+  todos @gmail.com), feedback para carlosedudalsin@gmail.com. Foram as 15 mudanças da
+  "Visão geral da publicação" (versão, países, testadores, ficha pt-BR, classificação,
+  público-alvo, segurança dos dados, privacidade…). Revisão do Google: até 7 dias.
+  Links de participação do teste fechado (só funcionam para quem está na lista, e só
+  depois da aprovação da revisão): Web <https://play.google.com/apps/testing/com.bffx.bfmidi>,
+  Android <https://play.google.com/store/apps/details?id=com.bffx.bfmidi>.
+  **Pegadinha resolvida**: a checagem pré-revisão acusava "Política de Privacidade →
+  Página não encontrada" porque a URL foi salva no Console ANTES de o `git pwa apk.bat`
+  publicar a página; o 404 ficou em cache. Regravar a URL (`privacy.html?v=2`) forçou
+  nova checagem e liberou o envio. A página real responde 200 sem o `?v=2`.
+- **Lista de testadores (9 set)**: 47 e-mails na lista "Teste fechado BFMiDi" (quinto lote: lucasguitar17, meirelles182 @gmail.com) (quarto lote: jeffersonalves30, ander.mess, michaelguitarra, ramon.consultoria, ruanpablo, robertoelets, savio.asm, lucas.duarte81.ld, pauloandre.paos, rafa.cesino, wagnereletrica90 @gmail.com + igo.nascimento@hotmail.com e amigomiqueles@hotmail.com aceitos; `nandokash@hotmail.com` RECUSADO) (terceiro lote: lwloureiro, manamachado8, paulotarrossi83, paulo.lopes486 @gmail.com; `rinaldoflx@hotmail.com` RECUSADO, como o Outlook) (segundo lote: rafguita, sudafarias, rheueldominguesoficial, cleberpassanante, gildivanjr @gmail.com + marioarriro@hotmail.com, que o Console ACEITOU — o critério é ser conta Google, não o domínio)
+  (os 6 iniciais + rodrigomathews7, israel.correia, igorsilva226, apoiopessoaldaversonbrant,
+  vitoorcoelho, brunohscedrim, oliriber, stefaninimatheus, caliuzus, lipekarica,
+  saulopetra.petra, ruanstg, celsolima.prof, davidsamuelcordeiro10, phdssoares,
+  jsoudejesus — todos @gmail.com). **`newtonschuindt@outlook.com` foi RECUSADO** pelo
+  Console ("Não foi possível salvar as alterações") — o diálogo de lista só aceita
+  endereço de conta Google; peça a esse testador um @gmail.com. Dica operacional: o
+  diálogo falha ao salvar lotes grandes se UM endereço for inválido, sem dizer qual —
+  adicione em lotes pequenos para isolar. Adicionar e-mail na lista NÃO gera nova
+  revisão.
+- **Falta**: os testadores aceitarem pelo link (12+ inscritos ao mesmo tempo por 14
+  dias) → "Solicitar a produção" no Painel (seção 6.2) → produção (6.3).
+
+---
+
 ## 0. Antes de abrir o Console
 
 1. **Preencha o e-mail de contato** em [play/privacy.html](play/privacy.html)
@@ -185,17 +228,21 @@ da loja sem desinstalar**:
 
 - **Recomendado — usar a chave que já existe** (`app/bfmidi-release.jks`, alias
   `bfmidi`, senha `bfmidi123`): a assinatura da loja fica idêntica à do sideload, e
-  o Android aceita instalar um por cima do outro. No Console: *Integridade do app →
-  Assinatura de apps → **Usar uma chave diferente** → **Exportar e fazer upload de
-  uma chave de um keystore Java***. O Console entrega a ferramenta `pepk.jar` e uma
-  chave pública `encryption_public_key.pem`; no PC (precisa de Java 17, o mesmo do
-  CI):
+  o Android aceita instalar um por cima do outro. No Console (set/2026): *Protegido com o
+  Google Play → Assinatura de apps* (URL `.../keymanagement`) → **Mudar chave** →
+  **Exportar e fazer upload de uma chave de um keystore Java**. O Console já vem
+  com uma chave gerada pelo Google "Em uso"; o botão só existe **antes** do primeiro
+  upload de bundle. O diálogo entrega a ferramenta `pepk.jar` (~9 MB) e uma chave
+  pública `encryption_public_key.pem`; no PC (qualquer Java ≥ 11 — foi usado o
+  JDK 21 da Adoptium):
 
   ```bash
-  java -jar pepk.jar --keystore=app/bfmidi-release.jks --alias=bfmidi --output=bfmidi-signing.zip --include-cert --rsa-aes-encryption --encryption-key-path=encryption_public_key.pem
+  java -jar pepk.jar --keystore=app/bfmidi-release.jks --alias=bfmidi --output=bfmidi-signing.zip --include-cert --rsa-aes-encryption --encryption-key-path=encryption_public_key.pem --keystore-pass=bfmidi123 --key-pass=bfmidi123
   ```
 
-  Senha do keystore e da chave: `bfmidi123`. Suba o `bfmidi-signing.zip`. A mesma
+  (`--keystore-pass`/`--key-pass` evitam o prompt interativo.) Suba o
+  `bfmidi-signing.zip` no passo 4 do diálogo e **Salvar**; confira que o SHA-256 da
+  chave de assinatura do app bate com `keytool -list -v` do jks. A mesma
   chave passa a valer como **chave de upload** (é a que o CI já usa no `.aab`).
 
 - **Alternativa — deixar o Google gerar**: mais simples, mas a assinatura da loja

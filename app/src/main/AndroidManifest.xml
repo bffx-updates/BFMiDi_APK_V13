@@ -10,6 +10,14 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- Bluetooth LE: transporte alternativo do editor (BleBridge.kt). 12+ usa
+         SCAN/CONNECT (scan sem localizacao); ate o 11 o scan exige BLUETOOTH +
+         ACCESS_FINE_LOCATION (ja declarada acima, maxSdk 32). -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <!-- REQUEST_INSTALL_PACKAGES (atualizador interno) vive SO no flavor
          github: src/github/AndroidManifest.xml. O bundle da Play Store nao pode
          leva-la (politica da loja) — ver app/build.gradle. -->
