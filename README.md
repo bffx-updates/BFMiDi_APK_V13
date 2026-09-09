@@ -50,6 +50,15 @@ Não precisa instalar nada localmente. O build roda no **GitHub Actions**:
    - na aba **Releases** (publicado a cada build), ou
    - em **Actions → run → Artifacts**.
 
+## Publicar na Google Play
+
+O mesmo workflow também gera o **`BFMIDI-editor-play.aab`** (flavor `play`,
+sem o atualizador interno — a Play proíbe app da loja se atualizar por fora
+dela). O passo a passo completo do Play Console — criação do app, formulários,
+textos da ficha, gráficos em `play/`, assinatura (Play App Signing com a chave
+existente) e o teste fechado de 12 testadores exigido para contas pessoais —
+está em **[PLAY_STORE.md](PLAY_STORE.md)**.
+
 ## Como instalar no celular
 
 1. Baixe o `BFMIDI-editor.apk` no Android.

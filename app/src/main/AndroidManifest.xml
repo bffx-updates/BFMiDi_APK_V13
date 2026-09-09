@@ -10,8 +10,9 @@
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
-    <!-- Atualizador interno: baixa o APK da release nova e dispara a instalacao. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- REQUEST_INSTALL_PACKAGES (atualizador interno) vive SO no flavor
+         github: src/github/AndroidManifest.xml. O bundle da Play Store nao pode
+         leva-la (politica da loja) — ver app/build.gradle. -->
 
     <application
         android:allowBackup="true"

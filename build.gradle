@@ -1,5 +1,7 @@
 // Projeto raiz — declara os plugins (sem aplicar; o :app aplica).
+// AGP 8.9.x e o minimo que compila com compileSdk 36 (exigencia da Play Store
+// pra apps novos desde ago/2026); pede Gradle 8.11.1, fixado no workflow.
 plugins {
-    id 'com.android.application' version '8.5.2' apply false
+    id 'com.android.application' version '8.9.3' apply false
     id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
 }

@@ -25,6 +25,8 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import org.json.JSONObject
 import java.io.File
 import android.graphics.Color
@@ -231,6 +233,22 @@ class MainActivity : AppCompatActivity() {
         errorView.visibility = View.GONE
         root.addView(errorView, frame())
 
+        // EDGE-TO-EDGE (targetSdk 35+, obrigatorio; no 36 nao ha mais opt-out):
+        // o sistema deixa de reservar espaco pras barras de status/navegacao e
+        // o WebView passaria por baixo delas — o header do editor ficava
+        // escondido atras do relogio. Recua o root pelas insets (barras,
+        // recorte da camera e TECLADO, que na mesma regra deixou de encolher a
+        // janela sozinho); o fundo preto do tema pinta a faixa atras das barras.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or
+                    WindowInsetsCompat.Type.ime()
+            )
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+
         setContentView(root)
 
         fileChooserLauncher = registerForActivityResult(
@@ -259,7 +277,9 @@ class MainActivity : AppCompatActivity() {
             getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         registerNetworkObserver()
         probeAndLoad(true)
-        checkForUpdate()
+        // So no flavor github (sideload). No bundle da Play Store o app nao
+        // pode se atualizar por fora da loja — ver app/build.gradle.
+        if (BuildConfig.SELF_UPDATE) checkForUpdate()
     }
 
     // ── Atualizador interno ────────────────────────────────────────────────

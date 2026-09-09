@@ -177,6 +177,29 @@ Por isso usamos uma **chave FIXA**:
 
 ---
 
+### 5.1. Play Store: flavors `github` × `play` (set/2026)
+
+A loja recebe um **bundle `.aab`**, e um app da Play **não pode se atualizar
+por fora dela** (política *Device and Network Abuse*) nem carregar
+`REQUEST_INSTALL_PACKAGES`. Por isso o `app/build.gradle` tem dois *product
+flavors* na dimensão `dist`: **`github`** (o APK de sideload de sempre, com o
+atualizador interno e a permissão no manifesto próprio
+`src/github/AndroidManifest.xml`) e **`play`** (o `.aab` da loja, com
+`BuildConfig.SELF_UPDATE = false`, o único ponto de decisão no código). O
+workflow roda `assembleGithubRelease bundlePlayRelease` e anexa os dois à
+Release. A chave `bfmidi-release.jks` continua assinando ambos; na Play ela é
+a **chave de upload**, e a chave que assina o APK entregue ao usuário é a do
+Play App Signing — exportar a mesma chave pra lá (PEPK) mantém a assinatura
+igual à do sideload. Detalhes e o passo a passo do Console em
+[PLAY_STORE.md](PLAY_STORE.md).
+
+Duas exigências da loja que mudaram o app inteiro, não só o flavor:
+`targetSdk`/`compileSdk` **36** (Android 16; apps novos precisam da API do ano
+anterior desde 31/ago/2026, o que puxou AGP 8.9.3 + Gradle 8.11.1) e, com
+isso, **edge-to-edge obrigatório sem opt-out** — o `MainActivity` recua o root
+pelas insets de barras, recorte e teclado (`setOnApplyWindowInsetsListener`),
+senão o header do editor fica atrás do relógio e o teclado cobre os campos.
+
 ## 6. Versionamento automático
 
 `app/build.gradle` lê do ambiente (default `1` / `1.0` em build local):

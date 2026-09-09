@@ -9,14 +9,45 @@ def bfVersionName = System.getenv("BF_VERSION_NAME") ?: "1.0"
 
 android {
     namespace 'com.bffx.bfmidi'
-    compileSdk 34
+    // Play Store: apps novos precisam mirar a API do Android do ano anterior
+    // (36 = Android 16 desde 31/ago/2026). compileSdk 36 exige AGP >= 8.9.1
+    // (ver build.gradle da raiz) e Gradle 8.11.1 (ver o workflow).
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.bffx.bfmidi"
         minSdk 24
-        targetSdk 34
+        // targetSdk 35+ = edge-to-edge OBRIGATORIO (e no 36 sem opt-out): o
+        // WebView passa por baixo das barras do sistema. MainActivity recua o
+        // root pelas insets — ver o setOnApplyWindowInsetsListener no onCreate.
+        targetSdk 36
         versionCode bfVersionCode
         versionName bfVersionName
+    }
+
+    // DUAS DISTRIBUICOES, um codigo so:
+    //   github — o APK de sideload de sempre (Releases do GitHub). Tem o
+    //            atualizador interno (baixa a release nova e instala) e, por
+    //            isso, a permissao REQUEST_INSTALL_PACKAGES no manifesto
+    //            proprio (src/github/AndroidManifest.xml).
+    //   play   — o bundle (.aab) da Play Store. SEM atualizador: a politica
+    //            "Device and Network Abuse" proibe app da loja se atualizar por
+    //            fora dela, e a permissao de instalar pacotes reprovaria a
+    //            revisao. Quem atualiza e a propria Play.
+    // O flag SELF_UPDATE e o unico ponto de decisao no codigo (MainActivity).
+    flavorDimensions += "dist"
+    productFlavors {
+        github {
+            dimension "dist"
+            buildConfigField "boolean", "SELF_UPDATE", "true"
+        }
+        play {
+            dimension "dist"
+            buildConfigField "boolean", "SELF_UPDATE", "false"
+        }
+    }
+    buildFeatures {
+        buildConfig true
     }
 
     signingConfigs {
@@ -26,6 +57,12 @@ android {
             // atualizacao por cima sem desinstalar. App pessoal de sideload, entao
             // a senha viver no repo e aceitavel. Envolto em if pra builds locais
             // sem o keystore nao quebrarem a configuracao.
+            //
+            // Na Play Store esta MESMA chave e a "upload key" do bundle; a chave
+            // com que a loja assina o APK entregue ao usuario e decidida uma
+            // vez so no Play App Signing (ver PLAY_STORE.md — exportar ESTA chave
+            // pra la mantem a assinatura igual a do sideload, e o usuario troca
+            // de um pro outro sem desinstalar).
             def ks = file("bfmidi-release.jks")
             if (ks.exists()) {
                 storeFile ks

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Manifesto SO do flavor github (APK de sideload, Releases do GitHub).
+     E mesclado ao src/main/AndroidManifest.xml pelo AGP. O bundle da Play
+     Store (flavor play) NAO recebe esta permissao: app da loja se atualizar por
+     fora dela viola a politica "Device and Network Abuse" e reprova a revisao.
+     O codigo do atualizador fica desligado la por BuildConfig.SELF_UPDATE. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Atualizador interno: baixa o APK da release nova e dispara a instalacao. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

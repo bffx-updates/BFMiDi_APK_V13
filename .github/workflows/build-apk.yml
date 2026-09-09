@@ -46,10 +46,12 @@ jobs:
             echo "Keystore ja existe — usando o commitado."
           fi
 
+      # 8.11.1 = minimo do AGP 8.9 (que por sua vez e o minimo do compileSdk 36
+      # exigido pela Play Store). Subir o AGP sem subir isto quebra o build.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.11.1'
 
       # OFFSET DE 1000 — load-bearing na migracao pro repo v13
       # (bffx-updates/BFMiDi_APK_V13, ago/2026). O versionCode vinha de
@@ -67,22 +69,41 @@ jobs:
       # sem job nenhum e sem Release — foi assim que a linha v13 ficou sem APK
       # publicado (runs #1..#8, ago/2026). Exporta pro GITHUB_ENV pra que os
       # passos seguintes (inclusive a tag do Release) usem o MESMO numero.
+      # versionName = versao do EDITOR embutido (assets/webapp_version.txt,
+      # "13.8+hash", copiado pelo git pwa apk.bat) + numero do run. E o que
+      # aparece na Play Store e em "Sobre o app"; sem o marcador cai em 13.0.
       - name: Compute version
         run: |
           echo "BF_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "BF_VERSION_NAME=13.0.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          EDV="13.0"
+          if [ -f app/src/main/assets/webapp_version.txt ]; then
+            EDV="$(cut -d+ -f1 app/src/main/assets/webapp_version.txt | tr -d '[:space:]')"
+            [ -n "$EDV" ] || EDV="13.0"
+          fi
+          echo "BF_VERSION_NAME=$EDV.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
-      - name: Build release APK
-        run: gradle assembleRelease --no-daemon --stacktrace
+      # Dois produtos do mesmo codigo (ver app/build.gradle):
+      #   APK do flavor github  -> sideload (Releases), com atualizador interno
+      #   AAB do flavor play    -> Play Store (upload manual no Play Console)
+      - name: Build release APK (github) + AAB (play)
+        run: gradle assembleGithubRelease bundlePlayRelease --no-daemon --stacktrace
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk BFMIDI-editor.apk
+      - name: Rename outputs
+        run: |
+          cp app/build/outputs/apk/github/release/app-github-release.apk BFMIDI-editor.apk
+          cp app/build/outputs/bundle/playRelease/app-play-release.aab BFMIDI-editor-play.aab
 
       - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: BFMIDI-editor-apk
           path: BFMIDI-editor.apk
+
+      - name: Upload AAB (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: BFMIDI-editor-play-aab
+          path: BFMIDI-editor-play.aab
 
       # A tag carrega o versionCode (nao o run_number cru): o atualizador
       # interno do APK (MainActivity.checkForUpdate) le o numero DA TAG e
@@ -93,4 +114,6 @@ jobs:
         with:
           tag_name: build-${{ env.BF_VERSION_CODE }}
           name: BFMIDI Editor (build ${{ env.BF_VERSION_CODE }})
-          files: BFMIDI-editor.apk
+          files: |
+            BFMIDI-editor.apk
+            BFMIDI-editor-play.aab
