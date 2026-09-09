@@ -19,7 +19,7 @@ algo que não está aqui, é regra nova: siga o Console.
 ## 0. Antes de abrir o Console
 
 1. **Preencha o e-mail de contato** em [play/privacy.html](play/privacy.html)
-   (os dois placeholders `[e-mail de contato...]`). É o mesmo e-mail que vai na
+   (já preenchido: carlosedudalsin@gmail.com). É o mesmo e-mail que vai na
    ficha da loja.
 2. Rode **`git pwa apk.bat`** na raiz do repo. Ele:
    - publica o PWA com a política de privacidade em
