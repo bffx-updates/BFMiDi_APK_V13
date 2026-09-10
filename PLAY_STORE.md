@@ -54,6 +54,17 @@ algo que não está aqui, é regra nova: siga o Console.
   diálogo falha ao salvar lotes grandes se UM endereço for inválido, sem dizer qual —
   adicione em lotes pequenos para isolar. Adicionar e-mail na lista NÃO gera nova
   revisão.
+- **Ícones refeitos (9 set, noite)**: pacote novo de `Desktop/icones` aplicado em mipmaps
+  (legado + **adaptive icon** `mipmap-anydpi-v26` com `colors.xml` `#111315`; o
+  `ic_launcher_foreground` foi REGERADO a partir do master com a arte a 2/3 do canvas e
+  fundo transparente — o do pacote vinha em 100% e o Android corta ~33% das bordas do
+  adaptativo), `play/icon_512.png`, `play/icon_master_1024.png`, feature graphic
+  regenerado (scratchpad `play_graphics.py`), `AppIcon.appiconset` do iOS e
+  `webApp/icons/app-{192,512}.png`. `git pwa apk.bat` rodado → Release **build-1069**
+  (versionCode 1069). Feitos no Console (10 set, 00:xx): ícone + feature graphic trocados na ficha
+  (salvo) e versão 1069 criada/salva na faixa Alpha. **Falta clicar "Enviar 3 mudanças
+  para revisão"** na Visão geral da publicação — a janela do Chrome estava minimizada
+  (viewport 0×0) e o diálogo de confirmação não renderiza nesse estado.
 - **Falta**: os testadores aceitarem pelo link (12+ inscritos ao mesmo tempo por 14
   dias) → "Solicitar a produção" no Painel (seção 6.2) → produção (6.3).
 
