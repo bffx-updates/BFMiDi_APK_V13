@@ -98,6 +98,13 @@ class MainActivity : AppCompatActivity() {
     private val networkGeneration = AtomicInteger(0)
     private var pendingReprobe = false
     private var failedProbes = 0
+    // Primeira volta ao primeiro plano NAO invalida a sondagem inicial (ver onResume).
+    private var wasPaused = false
+    // Rede Wi-Fi que o observador ja viu: o onAvailable do registro (a rede
+    // atual) nao e uma troca de rede.
+    private var observedWifi: Network? = null
+    private var bindFailures = 0
+    private lateinit var backCallback: OnBackPressedCallback
     private var editorLoaded = false
     private var currentApiHost: String? = null
     // Resultado de uma sondagem que terminou ANTES de a pagina carregar: e
@@ -229,7 +236,9 @@ class MainActivity : AppCompatActivity() {
         progressView = buildProgress()
         root.addView(progressView, frame())
 
-        errorView = buildError { probeAndLoad() }
+        // initial=true: depois de um erro de frame principal a pagina nao
+        // existe; so sondar de novo nunca chamaria loadUrl (beco sem saida).
+        errorView = buildError { probeAndLoad(true) }
         errorView.visibility = View.GONE
         root.addView(errorView, frame())
 
@@ -261,17 +270,16 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        // Botao "voltar" navega no historico do WebView em vez de fechar o app.
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+        // Botao "voltar" navega no historico do WebView em vez de fechar o app —
+        // mas so fica ARMADO quando ha historico (doUpdateVisitedHistory abaixo).
+        // Sempre ligado, ele anulava o gesto preditivo de voltar do Android 16,
+        // e o editor e uma SPA sem pushState: canGoBack() e quase sempre false.
+        backCallback = object : OnBackPressedCallback(false) {
             override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    webView.goBack()
-                } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                }
+                if (webView.canGoBack()) webView.goBack()
             }
-        })
+        }
+        onBackPressedDispatcher.addCallback(this, backCallback)
 
         connectivityManager =
             getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -328,7 +336,12 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 val url = apkUrl ?: return@Thread
-                if (latest > currentBuildNumber()) {
+                // So o proprio GitHub por HTTPS: a instalacao confia no que baixa.
+                val parsed = Uri.parse(url)
+                if (parsed.scheme != "https" || parsed.host != "github.com") return@Thread
+                val skipped = getSharedPreferences("bfmidi_update", MODE_PRIVATE)
+                    .getInt("skip_build", 0)
+                if (latest > currentBuildNumber() && latest != skipped) {
                     runOnUiThread { promptUpdate(latest, url) }
                 }
             } catch (e: Exception) {
@@ -338,12 +351,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun promptUpdate(buildNum: Int, apkUrl: String) {
-        if (isFinishing) return
+        // isDestroyed: a Activity pode ter sido recriada enquanto a thread
+        // consultava o GitHub — show() numa Activity morta e BadTokenException.
+        if (isFinishing || isDestroyed) return
         AlertDialog.Builder(this)
             .setTitle("Atualização disponível")
             .setMessage("Há uma versão nova do editor (build $buildNum). Atualizar agora?")
             .setPositiveButton("Atualizar") { _, _ -> ensureInstallPermissionThenDownload(apkUrl) }
-            .setNegativeButton("Agora não", null)
+            // "Agora nao" vale ate o PROXIMO build: sem isso o aviso voltava a
+            // cada abertura do app.
+            .setNegativeButton("Agora não") { _, _ ->
+                getSharedPreferences("bfmidi_update", MODE_PRIVATE)
+                    .edit().putInt("skip_build", buildNum).apply()
+            }
             .setCancelable(true)
             .show()
     }
@@ -415,13 +435,19 @@ class MainActivity : AppCompatActivity() {
             pendingApkUrl = null
             downloadAndInstall(url)
         }
-        scheduleNetworkReprobe()
+        webView.onResume()
+        // So re-sonda ao VOLTAR do segundo plano. No arranque a sondagem do
+        // onCreate ja esta em voo; invalidar a geracao aqui a descartava e o
+        // app pagava um ciclo inteiro (NSD + timeouts) a mais ate conectar.
+        if (wasPaused) scheduleNetworkReprobe()
         mainHandler.removeCallbacks(idleReprobe)
         mainHandler.postDelayed(idleReprobe, idleReprobeMs)
     }
 
     override fun onPause() {
         activityResumed = false
+        wasPaused = true
+        webView.onPause()
         mainHandler.removeCallbacks(networkReprobe)
         mainHandler.removeCallbacks(idleReprobe)
         super.onPause()
@@ -473,21 +499,38 @@ class MainActivity : AppCompatActivity() {
                     (uri.port == -1 || uri.port == 80) &&
                     (uri.path ?: "").startsWith("/assets/")
                 if (trustedAsset) return false
+                // Subframe nunca navega pra fora; e so esquemas web saem do app
+                // (tel:/sms:/market:/intent: vindos da pagina sao descartados).
+                if (!request.isForMainFrame) return true
+                if (uri.scheme !in setOf("http", "https", "mailto")) return true
                 return try {
                     startActivity(Intent(Intent.ACTION_VIEW, uri))
                     true
                 } catch (_: Exception) { true }
             }
 
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                backCallback.isEnabled = view.canGoBack()
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 if (url.startsWith(assetEntry)) {
                     editorLoaded = true
+                    // A pagina acabou de nascer (primeira carga ou recarga feita
+                    // pelo proprio editor — ZERAR do modo offline) e nao conhece
+                    // host nenhum. Esquecer o que ja foi entregue e o que impede
+                    // a proxima entrega de ser suprimida como "repetida", que
+                    // deixava o editor preso em OFFLINE ate a rede mudar.
+                    val known = currentApiHost
+                    currentApiHost = null
                     // Sondagem que terminou durante o load: entrega agora. O
                     // editor tem um stub de modulo que guarda a chamada ate o
                     // App() montar a ponte, entao nao ha corrida com o app.js.
                     if (hasPendingApi) {
                         hasPendingApi = false
                         deliverApiHost(pendingApiHost)
+                    } else if (known != null) {
+                        deliverApiHost(known)
                     }
                 }
                 showWeb()
@@ -562,9 +605,14 @@ class MainActivity : AppCompatActivity() {
         if (!runCatching { connectivityManager.bindProcessToNetwork(wifiNetwork) }
                 .getOrDefault(false)) {
             probing.set(false)
-            mainHandler.postDelayed(networkReprobe, 800)
+            // Backoff 0,8 s -> 1,6 -> 3,2 -> 6,4 -> 8 s: sem Wi-Fi nenhum isto
+            // repetia a cada 800 ms para sempre.
+            val delay = minOf(800L shl minOf(bindFailures, 4), 8000L)
+            bindFailures++
+            mainHandler.postDelayed(networkReprobe, delay)
             return
         }
+        bindFailures = 0
         Thread {
             var apiHost: String? = null
             val pool = Executors.newFixedThreadPool(3)
@@ -725,7 +773,12 @@ class MainActivity : AppCompatActivity() {
                             resolving.set(false)
                         }
                         override fun onServiceResolved(info: NsdServiceInfo) {
-                            val host = info.host
+                            // Desde o 13.8 o pedal anuncia AAAA link-local tambem;
+                            // no API 34+ getHost() e so o PRIMEIRO endereco, e se
+                            // for o v6 a descoberta ficava muda. Procura o v4.
+                            val host = if (Build.VERSION.SDK_INT >= 34) {
+                                info.hostAddresses.firstOrNull { it is Inet4Address } ?: info.host
+                            } else info.host
                             if (host is Inet4Address) {
                                 val port = if (info.port > 0) info.port else 80
                                 found.add("http://${host.hostAddress}" + if (port == 80) "" else ":$port")
@@ -777,18 +830,36 @@ class MainActivity : AppCompatActivity() {
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = scheduleNetworkReprobe()
-            override fun onLost(network: Network) = scheduleNetworkReprobe()
+            override fun onAvailable(network: Network) {
+                mainHandler.post {
+                    // O registro entrega a rede ATUAL na hora: nao e troca de
+                    // rede, e a sondagem do onCreate ja esta em voo com ela.
+                    val first = observedWifi == null
+                    if (network == observedWifi) return@post
+                    observedWifi = network
+                    if (!first) scheduleNetworkReprobe()
+                }
+            }
+            override fun onLost(network: Network) {
+                mainHandler.post {
+                    if (network == observedWifi) observedWifi = null
+                    scheduleNetworkReprobe()
+                }
+            }
+            // Validacao/portal cativo/custo mudam sem a rede mudar: re-sonda,
+            // mas SEM invalidar a sondagem que ja esta em voo.
             override fun onCapabilitiesChanged(
                 network: Network, capabilities: NetworkCapabilities
-            ) = scheduleNetworkReprobe()
+            ) {
+                mainHandler.post { scheduleNetworkReprobe(invalidate = false) }
+            }
         }
         networkCallback = callback
         connectivityManager.registerNetworkCallback(request, callback)
     }
 
-    private fun scheduleNetworkReprobe() {
-        networkGeneration.incrementAndGet()
+    private fun scheduleNetworkReprobe(invalidate: Boolean = true) {
+        if (invalidate) networkGeneration.incrementAndGet()
         mainHandler.removeCallbacks(networkReprobe)
         mainHandler.postDelayed(networkReprobe, 800)
     }
@@ -1022,6 +1093,7 @@ class MainActivity : AppCompatActivity() {
         releaseApRequest()
         mainHandler.removeCallbacks(idleReprobe)
         runCatching { connectivityManager.bindProcessToNetwork(null) }
+        (webView.parent as? android.view.ViewGroup)?.removeView(webView)
         webView.destroy()
         super.onDestroy()
     }

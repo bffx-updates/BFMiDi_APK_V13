@@ -4,7 +4,8 @@ App Android que roda o **editor BFMIDI** em tela cheia, sem a barra do navegador
 
 **A UI do editor é EMBUTIDA no próprio APK** (`app/src/main/assets/`, build do
 `webApp/`), não vem mais do pedal. O app só fala com o pedal pela **API JSON**
-(HTTP local) usando o `?api=` do editor. Vantagens: mudança de tela = atualizar
+(HTTP local), entregando o endereço pela ponte JS `BFMIDI_SET_API` (o `?api=`
+saiu em set/2026: o editor sobe na hora em modo offline). Vantagens: mudança de tela = atualizar
 o APK (sem reflashar a LittleFS), carrega mais rápido e sem cache velho do PWA.
 
 Ao abrir, o editor sobe **na hora, em MODO OFFLINE**: uma BFMIDI virtual guardada
