@@ -619,24 +619,46 @@ class MainActivity : AppCompatActivity() {
             try {
                 val prefs = getSharedPreferences("bfmidi_network", MODE_PRIVATE)
                 val saved = prefs.getString("last_api", null)
-                // Nao troca de pedal so porque outro respondeu mais rapido.
-                if (current != null && reachableBfmidi(current, wifiNetwork)) {
-                    apiHost = current
+                // Regra (set/2026): a REDE DE CASA (STA) ganha do AP sempre que
+                // responder. Com o pedal em AP+STA e o celular ainda no
+                // BFMIDI_WIFI, o app ficava preso no AP e o status nunca virava
+                // STA sozinho. O pedal da sessao e preservado (device_id): outro
+                // pedal respondendo pela STA nao rouba a conexao. Sem STA, o AP
+                // responde na hora e o app espera no maximo 1,5 s por uma
+                // resposta STA antes de aceita-lo.
+                val session = current?.let { probePedal(it, wifiNetwork) }
+                if (session != null && !session.viaAp) {
+                    apiHost = session.host
                     return@Thread
                 }
-                val results = ExecutorCompletionService<String?>(pool)
                 val known = listOfNotNull(saved, "http://192.168.4.1").distinct()
-                for (host in known) results.submit(Callable {
-                    if (reachableBfmidi(host, wifiNetwork)) host else null
-                })
+                    .filter { it != current }
+                val skip = (known + listOfNotNull(current)).toSet()
+                val results = ExecutorCompletionService<Reach?>(pool)
+                for (host in known) results.submit(Callable { probePedal(host, wifiNetwork) })
                 results.submit(Callable {
-                    (discoverNsdCandidates(2200) + "http://bfmidi.local")
-                        .distinct().firstOrNull { reachableBfmidi(it, wifiNetwork) }
+                    (discoverNsdCandidates(2200) + "http://bfmidi.local").distinct()
+                        .filter { it !in skip }
+                        .firstNotNullOfOrNull { probePedal(it, wifiNetwork) }
                 })
-                for (i in 0 until known.size + 1) {
-                    val result = results.take().get()
-                    if (result != null) { apiHost = result; break }
+                var apFallback: String? = session?.host
+                var deadline = if (apFallback != null) System.currentTimeMillis() + 1500 else Long.MAX_VALUE
+                var remaining = known.size + 1
+                while (remaining > 0) {
+                    val wait = deadline - System.currentTimeMillis()
+                    if (wait <= 0) break
+                    val future = results.poll(wait, TimeUnit.MILLISECONDS) ?: break
+                    remaining--
+                    val reach = future.get() ?: continue
+                    val sameUnit = session == null || session.deviceId == null ||
+                        reach.deviceId == null || reach.deviceId == session.deviceId
+                    if (!reach.viaAp && sameUnit) { apiHost = reach.host; break }
+                    if (reach.viaAp && apFallback == null) {
+                        apFallback = reach.host
+                        deadline = System.currentTimeMillis() + 1500
+                    }
                 }
+                if (apiHost == null) apiHost = apFallback
             } catch (_: Exception) { /* Uma nova tentativa confirma a queda. */ }
             finally {
                 pool.shutdownNow()
@@ -664,8 +686,15 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    /** Resposta de um pedal validado: via_ap sai do /ping (o socket que o
+     *  pedal aceitou), device_id distingue duas unidades. */
+    private data class Reach(val host: String, val viaAp: Boolean, val deviceId: String?)
+
+    private fun reachableBfmidi(base: String, network: Network?): Boolean =
+        probePedal(base, network) != null
+
     /** Exige o JSON de identidade do firmware; roteador/portal nao passa. */
-    private fun reachableBfmidi(base: String, network: Network?): Boolean {
+    private fun probePedal(base: String, network: Network?): Reach? {
         try {
             val c = ((network?.openConnection(URL("$base/ping")) ?: URL("$base/ping").openConnection()) as HttpURLConnection).apply {
                 connectTimeout = 2200
@@ -685,11 +714,18 @@ class MainActivity : AppCompatActivity() {
             if (body != null) {
                 val json = runCatching { JSONObject(body) }.getOrNull()
                 if (json != null && json.optBoolean("ok") &&
-                    json.optString("product") == "BFMIDI") return true
+                    json.optString("product") == "BFMIDI") {
+                    // Firmware sem via_ap (<= 13.6): o endereco decide.
+                    return Reach(
+                        base,
+                        json.optBoolean("via_ap", base == "http://192.168.4.1"),
+                        json.optString("device_id").ifEmpty { null }
+                    )
+                }
             }
         } catch (_: Exception) { /* cai no fallback abaixo */ }
 
-        if (Thread.currentThread().isInterrupted) return false
+        if (Thread.currentThread().isInterrupted) return null
         // Roda SEMPRE que o /ping nao provou identidade — inclusive quando ele
         // nem chegou a responder. Ja foi condicionado a "answered", e isso
         // fazia qualquer tropeco no /ping (timeout, conexao cortada) virar
@@ -713,12 +749,13 @@ class MainActivity : AppCompatActivity() {
                 c.disconnect()
             }
             if (body == null) {
-                false
+                null
             } else {
                 val json = runCatching { JSONObject(body) }.getOrNull()
-                json != null && (json.has("board") || json.has("chip"))
+                if (json != null && (json.has("board") || json.has("chip")))
+                    Reach(base, base == "http://192.168.4.1", null) else null
             }
-        } catch (_: Exception) { false }
+        } catch (_: Exception) { null }
     }
 
     private fun deliverApiHost(apiHost: String?) {
