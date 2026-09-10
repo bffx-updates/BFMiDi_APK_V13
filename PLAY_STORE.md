@@ -31,6 +31,12 @@ algo que não está aqui, é regra nova: siga o Console.
   GitHub). Lista "Testadores BFMiDi" = `carlosedudalsin@gmail.com`. Link de
   participação: <https://play.google.com/apps/internaltest/4701259295386312902>.
   Até a revisão, o app aparece com o nome temporário "com.bffx.bfmidi (unreviewed)".
+- **Teste fechado (faixa Alpha) — bundle 1078 (13.10.78) ENVIADO PARA REVISÃO** (10 set, ~12:50):
+  editor 13.10 com sondagem STA-primeiro, popup de conexão com radar e ícone novo.
+  Foi junto (mesmo envio) a mudança de ícone + recurso gráfico da ficha pt-BR, que
+  estavam pendentes na "Visão geral da publicação". Substituiu a 1069, que tinha
+  sido criada de manhã e nunca enviada — lembrete: com publicação gerenciada
+  DESATIVADA, salvar a versão NÃO envia; é preciso "Enviar N mudanças para revisão".
 - **Teste fechado (faixa Alpha) ENVIADO PARA REVISÃO** (9 set, ~01:00): bundle 1062,
   notas pt-BR, 177 países, lista "Teste fechado BFMiDi" com 6 e-mails (carlosedudalsin,
   brunoguita1040, janioprimo1, escrevaparaleonardo, britodiegopassos31, caio.anacecilia —
