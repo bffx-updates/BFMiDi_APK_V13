@@ -136,14 +136,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Bluetooth LE (BleBridge.kt): transporte alternativo ao Wi-Fi pro editor.
-    // A ponte so diz quais permissoes faltam; quem pede e este launcher, e o
-    // resultado volta pra ela retomar o connect().
-    private var bleBridge: BleBridge? = null
-    private val blePermissions = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result -> bleBridge?.onPermissionResult(result.values.all { it }) }
-
     private fun wifiJoinStatus(state: String, message: String) {
         if (isDestroyed) return
         val payload = JSONObject().put("state", state).put("message", message)
@@ -534,10 +526,6 @@ class MainActivity : AppCompatActivity() {
         // que grava o arquivo na pasta Downloads (ver DownloadBridge).
         webView.addJavascriptInterface(DownloadBridge(), "BFMIDIDownloader")
         webView.addJavascriptInterface(WifiBridge(), "BFMIDIWifi")
-        // Bluetooth LE: window.BFMIDIBle (contrato em webApp/ble_transport.js).
-        val ble = BleBridge(this, webView) { perms -> blePermissions.launch(perms) }
-        bleBridge = ble
-        webView.addJavascriptInterface(ble, "BFMIDIBle")
     }
 
     /**
@@ -1025,7 +1013,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        bleBridge?.close()
         mainHandler.removeCallbacks(networkReprobe)
         networkCallback?.let {
             try { connectivityManager.unregisterNetworkCallback(it) }
