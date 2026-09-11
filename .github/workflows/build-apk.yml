@@ -1,9 +1,15 @@
 name: Build APK
 
+# DESDE 11/set/2026 O BUILD OFICIAL E LOCAL (build_apk.sh / build_apk.bat na
+# raiz do projeto BFMiDi_V13, fora deste repo): a chave fica so no computador
+# e o versionCode passou a ser AAMMDDNN (ex.: 26091101), MAIOR que qualquer
+# "1000 + run_number" daqui. Por isso este workflow NAO roda mais a cada push:
+# um Release gerado aqui teria versionCode menor que o publicado e o Android
+# recusaria instalar por cima. Ficou so o disparo manual, pra emergencia — e
+# se for usado, o offset abaixo precisa passar a ser maior que o numero em
+# build_apk_versioncode.txt.
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:   # permite rodar manualmente pela aba Actions
+  workflow_dispatch:   # somente manual, pela aba Actions
 
 permissions:
   contents: write       # publicar release + commitar o keystore na 1a vez

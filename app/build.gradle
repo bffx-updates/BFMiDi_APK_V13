@@ -63,12 +63,20 @@ android {
             // vez so no Play App Signing (ver PLAY_STORE.md — exportar ESTA chave
             // pra la mantem a assinatura igual a do sideload, e o usuario troca
             // de um pro outro sem desinstalar).
-            def ks = file("bfmidi-release.jks")
+            //
+            // BUILD LOCAL (set/2026, build_apk.sh / build_apk.bat na raiz do
+            // projeto): o keystore e a senha podem vir do ambiente —
+            // BFMIDI_KEYSTORE (caminho do .jks) e BFMIDI_KEYSTORE_PASSWORD.
+            // Sem as variaveis cai no arquivo/senha de sempre, entao o CI do
+            // GitHub continua funcionando sem mudanca.
+            def ksPath = System.getenv("BFMIDI_KEYSTORE")
+            def ks = ksPath ? file(ksPath) : file("bfmidi-release.jks")
+            def ksPw = System.getenv("BFMIDI_KEYSTORE_PASSWORD") ?: "bfmidi123"
             if (ks.exists()) {
                 storeFile ks
-                storePassword "bfmidi123"
+                storePassword ksPw
                 keyAlias "bfmidi"
-                keyPassword "bfmidi123"
+                keyPassword ksPw
             }
         }
     }

@@ -83,3 +83,7 @@ em **"Atualizar"** — sem desinstalar, mantendo tudo.
 
 Abra a pasta `android_app/` no Android Studio. Ele baixa o SDK/Gradle e gera o
 APK em **Build → Build APK(s)**. Versão mínima: Android 7 (API 24).
+
+## Build local (set/2026)
+
+O APK e o AAB passaram a ser gerados no proprio computador por `build_apk.sh` (Mac) / `build_apk.bat` (Windows), na RAIZ do projeto `BFMiDi_V13` (fora deste repo). O script rebuilda o editor, copia os assets, calcula o `versionCode` (`AAMMDDNN`, contador em `build_apk_versioncode.txt`, ultimo do CI = 1079), assina com o `.jks` da pasta `chaves/` (tambem fora do repo) e deixa os arquivos em `output/apk/`. O `.aab` sobe a mao no Play Console. O workflow do Actions ficou so com disparo manual. O Gradle vem do wrapper (`gradlew`, 8.11.1); `app/build.gradle` aceita `BFMIDI_KEYSTORE` e `BFMIDI_KEYSTORE_PASSWORD` no ambiente (sem eles cai no arquivo/senha de sempre).
