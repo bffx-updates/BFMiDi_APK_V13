@@ -31,6 +31,7 @@ algo que não está aqui, é regra nova: siga o Console.
   GitHub). Lista "Testadores BFMiDi" = `carlosedudalsin@gmail.com`. Link de
   participação: <https://play.google.com/apps/internaltest/4701259295386312902>.
   Até a revisão, o app aparece com o nome temporário "com.bffx.bfmidi (unreviewed)".
+- **Build LOCAL desde 11/set/2026**: o próximo `.aab` sai de `build_apk.sh`/`.bat` na raiz do projeto (`output/apk/BFMIDI-editor-play-13.10.<code>.aab`, versionCode `AAMMDDNN`, primeiro = **26091101**), assinado com a mesma chave de upload; o Actions não publica mais.
 - **Teste fechado (faixa Alpha) — bundle 1078 (13.10.78) ENVIADO PARA REVISÃO** (10 set, ~12:50):
   editor 13.10 com sondagem STA-primeiro, popup de conexão com radar e ícone novo.
   Foi junto (mesmo envio) a mudança de ícone + recurso gráfico da ficha pt-BR, que
