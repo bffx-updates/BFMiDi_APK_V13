@@ -84,6 +84,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
+    // Insets das barras do sistema, em CSS px, entregues ao editor como
+    // variaveis no <html> (ver o listener de insets no onCreate). Reaplicadas a
+    // cada onPageFinished porque o reload cria outro documento.
+    private var editorInsetsCss: String = ""
+    private fun pushEditorInsets() {
+        if (!::webView.isInitialized || editorInsetsCss.isEmpty()) return
+        val js = "document.documentElement.style.cssText+=';$editorInsetsCss';"
+        webView.evaluateJavascript(js, null)
+    }
     private lateinit var errorView: View
     private lateinit var progressView: View
 
@@ -244,17 +253,28 @@ class MainActivity : AppCompatActivity() {
 
         // EDGE-TO-EDGE (targetSdk 35+, obrigatorio; no 36 nao ha mais opt-out):
         // o sistema deixa de reservar espaco pras barras de status/navegacao e
-        // o WebView passaria por baixo delas — o header do editor ficava
-        // escondido atras do relogio. Recua o root pelas insets (barras,
-        // recorte da camera e TECLADO, que na mesma regra deixou de encolher a
-        // janela sozinho); o fundo preto do tema pinta a faixa atras das barras.
+        // o WebView passa por baixo delas. Ate set/2026 o root era recuado pelas
+        // insets e o fundo preto do tema pintava uma FAIXA PRETA em cima e
+        // embaixo — no iPhone o editor vai ate a borda e reserva o espaco por
+        // env(safe-area-inset-*), que o WebView do Android NAO preenche. Entao:
+        // o WebView fica de borda a borda (fundo do editor atras das barras,
+        // que o tema deixa transparentes) e as insets das barras/recorte vao
+        // pro editor como --bf-inset-top/-bottom (o CSS usa max(env(), var())).
+        // So o TECLADO continua recuando o root, senao o campo em edicao some
+        // atras dele; nesse caso a inset de baixo do editor vira 0, porque o
+        // padding do root ja cobre a barra de navegacao.
         ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
             val bars = insets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or
-                    WindowInsetsCompat.Type.displayCutout() or
-                    WindowInsetsCompat.Type.ime()
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val imeUp = insets.isVisible(WindowInsetsCompat.Type.ime()) && ime.bottom > 0
+            v.setPadding(bars.left, 0, bars.right, if (imeUp) ime.bottom else 0)
+            val d = resources.displayMetrics.density
+            editorInsetsCss = "--bf-inset-top:%dpx;--bf-inset-bottom:%dpx".format(
+                (bars.top / d).toInt(), if (imeUp) 0 else (bars.bottom / d).toInt()
+            )
+            pushEditorInsets()
             insets
         }
 
@@ -516,6 +536,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 if (url.startsWith(assetEntry)) {
                     editorLoaded = true
+                    pushEditorInsets()
                     // A pagina acabou de nascer (primeira carga ou recarga feita
                     // pelo proprio editor — ZERAR do modo offline) e nao conhece
                     // host nenhum. Esquecer o que ja foi entregue e o que impede

@@ -3,8 +3,13 @@
     <!-- Sem action bar (o editor tem seu proprio header). Fundo escuro pra
          casar com a UI do BFMIDI e evitar flash branco no boot. -->
     <style name="Theme.BFMIDI" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:statusBarColor">#0a0a0c</item>
-        <item name="android:navigationBarColor">#0a0a0c</item>
+        <item name="android:windowBackground">#0d121c</item>
+        <!-- Transparentes: o WebView vai de borda a borda e o fundo do editor
+             aparece atras das barras (set/2026; antes era uma faixa preta). -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 </resources>
