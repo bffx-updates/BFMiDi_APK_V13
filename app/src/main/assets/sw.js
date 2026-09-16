@@ -1,5 +1,5 @@
 // BFMIDI Editor — Service Worker (gerado por webApp/build.mjs).
-const CACHE_NAME = 'bfmidi-prod-cc895117fca1';
+const CACHE_NAME = 'bfmidi-prod-36a2ca6fb55c';
 const APP_SHELL = [
   './',
   './index.html',
